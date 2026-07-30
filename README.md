@@ -4,9 +4,10 @@
 
 An interactive trend-watching knowledge graph over six months of tech news:
 11,969 Hacker News stories clustered into 120 topics, tethered to 30 shared
-concepts, and scored week by week. I built the whole path — ingestion,
-change detection, embeddings, clustering, layout, and the exploration UI —
-so a frozen snapshot of it runs anywhere with two commands and no database.
+concepts, and scored week by week. I built the whole path myself, from
+ingestion and change detection through embeddings, clustering, and layout to
+the exploration UI. A frozen snapshot ships in the repo, so it runs anywhere
+from a plain pip install: no database, no keys.
 
 ![Trend map](docs/trend_map.png)
 
@@ -51,6 +52,8 @@ produced the snapshot is in `pipeline/` and can rebuild it at any time.
 
 ## Run it
 
+Needs Python 3.11 or newer.
+
 ```
 git clone https://github.com/NikNord174/trendwatch-graph
 cd trendwatch-graph
@@ -85,8 +88,8 @@ database, applied to flat files.
   story cannot drown a quarter of steady coverage. Velocity is the last four
   weeks minus the four before.
 - **Source tiers.** Domains are ranked 1-4 (primary sources, established
-  press, blogs, social/aggregators) by a small curated table — crude, honest,
-  and easy to audit.
+  press, blogs, social/aggregators) by a small curated table. Crude, but
+  honest and easy to audit.
 - **Precomputed layout.** The force simulation runs offline; the viewers get
   final coordinates and keep the GPU for rendering only, which is why 12k
   nodes stay smooth.
@@ -96,10 +99,11 @@ database, applied to flat files.
 
 ## Tests
 
-`make test` — 33 pytest cases: the pure pipeline functions (hashing, snapshot
-diff, clustering helpers, the signal model) and integrity checks over the
-committed snapshot itself (links resolve, dates parse, hashes recompute).
-Streamlit glue is deliberately untested.
+`make test` — 45 pytest cases: the pure pipeline functions (hashing, snapshot
+diff, clustering helpers, the signal model, chat retrieval ranking) and
+integrity checks over the committed snapshot itself (links resolve, dates
+parse, hashes recompute, no orphaned concepts). Streamlit glue is
+deliberately untested.
 
 ## Data and licensing
 
@@ -111,8 +115,8 @@ Maps are rendered with [Cosmograph](https://cosmograph.app)
 
 ## Limitations
 
-- k-means always leaves a few incoherent clusters; they are visible in the
-  Topics table and I kept them — hiding a model's failure modes would
+- k-means always leaves a few incoherent clusters. They are visible in the
+  Topics table and I kept them; hiding a model's failure modes would
   misrepresent it.
 - Velocity over a frozen snapshot is illustrative; in live operation it
   would be recomputed on every refresh.

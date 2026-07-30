@@ -10,14 +10,22 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import cluster, dedupe, embed, export
+from . import cluster, dedupe, embed, export, fetch
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def load_raw(path: Path) -> list[dict]:
+    """Re-applies the URL guard so old raw files fetched before it existed
+    get the same treatment as fresh ones."""
+    stories = []
     with path.open(encoding="utf-8") as f:
-        return [json.loads(line) for line in f if line.strip()]
+        for line in f:
+            if line.strip():
+                story = json.loads(line)
+                story["url"] = fetch.clean_url(story.get("url", ""))
+                stories.append(story)
+    return stories
 
 
 def main() -> None:
@@ -28,6 +36,11 @@ def main() -> None:
 
     stories = dedupe.dedupe_stories(load_raw(args.raw))
     print(f"{len(stories)} stories after dedupe")
+    if len(stories) < 50:
+        raise SystemExit(
+            f"only {len(stories)} stories in {args.raw} — too few to cluster; "
+            "widen the fetch window (pipeline.fetch --days N)"
+        )
 
     hashes = dedupe.hash_stories(stories)
     hashes_path = ROOT / "data" / "hashes.json"

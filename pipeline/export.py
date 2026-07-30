@@ -119,8 +119,11 @@ def slug(term: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", term.lower()).strip("-")
 
 
-def story_concepts(title: str, matchers: dict[str, re.Pattern], limit: int = 3) -> list[str]:
-    return [c for c, m in matchers.items() if m.search(title)][:limit]
+def md_link(title: str, url: str) -> str:
+    """Link that stays parseable by the viewer's simple linkifier: square
+    brackets in titles become parens, parens in URLs get percent-encoded."""
+    text = title.replace("[", "(").replace("]", ")")
+    return f"[{text}]({url.replace('(', '%28').replace(')', '%29')})"
 
 
 def build_graph(
@@ -134,9 +137,16 @@ def build_graph(
     matchers = {c: cluster.concept_matcher(c) for c, _ in concepts}
     topic_sizes = Counter(int(t) for t in labels)
 
+    # One matcher pass per story feeds kw tags, co-occurrence edges, and the
+    # concept node sizes, so the three can never disagree.
+    matched = [sorted(c for c, m in matchers.items() if m.search(s["title"])) for s in stories]
+    concept_size = Counter(c for found in matched for c in found)
+
     nodes: list[dict] = []
-    for term, df in concepts:
-        nodes.append({"id": f"c:{slug(term)}", "t": "concept", "label": term, "size": df})
+    for term, _ in concepts:
+        nodes.append(
+            {"id": f"c:{slug(term)}", "t": "concept", "label": term, "size": concept_size[term]}
+        )
     for t in sorted(topic_sizes):
         nodes.append(
             {
@@ -148,7 +158,7 @@ def build_graph(
                 "area": cluster.dominant_area(shares.get(t, {})),
             }
         )
-    for story, lab in zip(stories, labels):
+    for story, lab, found in zip(stories, labels, matched):
         domain = domain_of(story["url"])
         nodes.append(
             {
@@ -163,7 +173,7 @@ def build_graph(
                 "tier": source_tier(domain),
                 "imp": importance(story["points"]),
                 "topic": int(lab),
-                "kw": story_concepts(story["title"], matchers),
+                "kw": found[:3],
             }
         )
 
@@ -183,9 +193,8 @@ def build_graph(
             add(f"t:{t}", f"c:{slug(c)}", "topic_concept", share, 2.0 + 3.0 * share)
 
     cooc = Counter()
-    for story in stories:
-        found = [c for c, m in matchers.items() if m.search(story["title"])]
-        cooc.update(combinations(sorted(found), 2))
+    for found in matched:
+        cooc.update(combinations(found, 2))
     for (a, b), n in cooc.most_common(40):
         add(f"c:{slug(a)}", f"c:{slug(b)}", "related", 0.0, 0.5 + min(n / 50, 1.0))
 
@@ -219,7 +228,7 @@ def topic_report(
         "Top stories by score:",
     ]
     for i, m in enumerate(top, 1):
-        lines.append(f"{i}. [{m['label']}]({m['url']}) — {m['points']} points, {m['date']}")
+        lines.append(f"{i}. {md_link(m['label'], m['url'])}, {m['points']} points, {m['date']}")
     return "\n".join(lines)
 
 

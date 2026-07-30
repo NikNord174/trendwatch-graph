@@ -61,10 +61,22 @@ EXTRA_STOPWORDS = {
     "things",
     "thing",
     "people",
-    "10",
-    "100",
-    "2025",
-    "2026",
+    # The token pattern requires a leading letter, so numerics and years never
+    # tokenize; apostrophe forms do, and sklearn's list has none of them.
+    "don't",
+    "doesn't",
+    "isn't",
+    "won't",
+    "can't",
+    "didn't",
+    "it's",
+    "what's",
+    "here's",
+    "there's",
+    "let's",
+    "i'm",
+    "you're",
+    "we're",
 }
 
 
@@ -79,8 +91,13 @@ def stopwords() -> list[str]:
 
 
 def pick_k(n_stories: int) -> int:
-    """Roughly one topic per ~90 stories, bounded to keep the map readable."""
-    return int(np.clip(n_stories // 90, 40, 120))
+    """Roughly one topic per ~90 stories, bounded to keep the map readable.
+
+    Small corpora get k capped at n/3 so k-means always has room to fit;
+    the 40..120 band only applies once the corpus can support it.
+    """
+    k = int(np.clip(n_stories // 90, 40, 120))
+    return max(2, min(k, n_stories // 3 or 2))
 
 
 def cluster_stories(vectors: np.ndarray, k: int, seed: int = 42) -> np.ndarray:
@@ -89,11 +106,25 @@ def cluster_stories(vectors: np.ndarray, k: int, seed: int = 42) -> np.ndarray:
     return KMeans(n_clusters=k, n_init=4, random_state=seed).fit_predict(vectors)
 
 
+def _fold_plural(word: str) -> str:
+    return word[:-1] if word.endswith("s") and len(word) > 3 else word
+
+
+def overlaps(a: str, b: str) -> bool:
+    """Whole-word containment with plural folding: 'models' overlaps 'model'
+    and 'language models', but 'ai' does not overlap 'openai' and 'war' does
+    not overlap 'software'."""
+    wa = [_fold_plural(w) for w in a.split()]
+    wb = [_fold_plural(w) for w in b.split()]
+    short, long = (wa, wb) if len(wa) <= len(wb) else (wb, wa)
+    return any(long[i : i + len(short)] == short for i in range(len(long) - len(short) + 1))
+
+
 def drop_redundant(terms: list[str]) -> list[str]:
     """Remove terms already contained in an earlier, higher-ranked term."""
     kept: list[str] = []
     for term in terms:
-        if any(term in other or other in term for other in kept):
+        if any(overlaps(term, other) for other in kept):
             continue
         kept.append(term)
     return kept
@@ -160,7 +191,7 @@ def extract_concepts(titles: list[str], max_concepts: int = 30) -> list[tuple[st
     ranked = sorted(zip(vocab, df), key=lambda x: -x[1])
     picked: list[tuple[str, int]] = []
     for term, count in ranked:
-        if any(term in seen or seen in term for seen, _ in picked):
+        if any(overlaps(term, seen) for seen, _ in picked):
             continue
         picked.append((term, int(count)))
         if len(picked) >= max_concepts:
@@ -169,8 +200,11 @@ def extract_concepts(titles: list[str], max_concepts: int = 30) -> list[tuple[st
 
 
 def concept_matcher(concept: str) -> re.Pattern:
+    """Lookarounds instead of \\b: the tokenizer produces terms ending in
+    non-word chars ('u.s.', 'c++'), and a trailing \\b after those can never
+    match, which would silently orphan the concept in the exported graph."""
     words = [re.escape(w) for w in concept.split()]
-    return re.compile(r"\b" + r"\s+".join(words) + r"\b", re.IGNORECASE)
+    return re.compile(r"(?<!\w)" + r"\s+".join(words) + r"(?!\w)", re.IGNORECASE)
 
 
 def concept_shares(

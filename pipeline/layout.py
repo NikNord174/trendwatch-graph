@@ -1,6 +1,8 @@
 """Force-directed layout, precomputed so the viewers can render with the
 GPU simulation off."""
 
+import random
+
 import numpy as np
 
 SPACE = 8192  # must match spaceSize in the map viewers
@@ -11,9 +13,11 @@ def layout_positions(
 ) -> np.ndarray:
     import igraph as ig
 
+    # igraph draws from Python's random module, not numpy's. Seeding here
+    # keeps reruns from rewriting every coordinate in the committed snapshot.
+    ig.set_random_number_generator(random.Random(seed))
     graph = ig.Graph(n=n_nodes, edges=[(a, b) for a, b, _ in edges])
     weights = [w for _, _, w in edges]
-    np.random.seed(seed)
     coords = graph.layout_fruchterman_reingold(weights=weights, niter=400)
     return scale_positions(np.asarray(coords.coords, dtype=np.float64))
 

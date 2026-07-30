@@ -46,11 +46,20 @@ def fetch_window(since: int, until: int, min_points: int, session: requests.Sess
     return out
 
 
+def clean_url(url: str) -> str:
+    """The API occasionally serves mangled URLs (double-pasted, embedded
+    markdown); treat those like self-posts rather than shipping dead links."""
+    url = (url or "").strip()
+    if not url.startswith(("http://", "https://")) or " " in url or url.count("http") > 1:
+        return ""
+    return url
+
+
 def normalize(hit: dict) -> dict:
     return {
         "id": str(hit["objectID"]),
         "title": (hit.get("title") or "").strip(),
-        "url": hit.get("url") or "",
+        "url": clean_url(hit.get("url") or ""),
         "points": int(hit.get("points") or 0),
         "comments": int(hit.get("num_comments") or 0),
         "created_at": hit.get("created_at") or "",

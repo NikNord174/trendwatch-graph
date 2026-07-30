@@ -2,9 +2,7 @@
 
 Every story gets a stable SHA-256 over its normalized title and URL. Comparing
 the current hash set against the previous snapshot's data/hashes.json tells
-which stories are new, changed, or gone since the last pipeline run — the same
-mechanism an incremental ingest would use against a database, applied to flat
-snapshots here.
+which stories are new, changed, or gone since the last pipeline run.
 """
 
 import hashlib

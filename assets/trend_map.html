@@ -1,0 +1,257 @@
+<!-- Trend map viewer. Renders window.GRAPH_DATA (built by pipeline/export.py):
+     stories attach to topic hubs, topics tether to shared anchor concepts, so
+     related clusters sit near each other. Positions are precomputed offline and
+     the GPU simulation stays off. Standalone: open next to graph_data.js; in
+     the app the data is inlined in place of the script stub. -->
+<script src="graph_data.js"></script>
+<style>
+  #cw { position: relative; width: 100%; height: 760px; background: #0a0a1e;
+        border-radius: 8px; overflow: hidden;
+        font-family: -apple-system, "Inter", system-ui, sans-serif; }
+  #cv { display: block; width: 100%; height: 100%; }
+  .lbl { position: absolute; transform: translate(-50%, -50%); pointer-events: none;
+         color: #eaf0ff; font-size: 11px; font-weight: 600; white-space: nowrap;
+         text-shadow: 0 0 6px #000, 0 0 10px #000; opacity: .92; }
+  .lbl.hub { font-size: 15px; font-weight: 800; letter-spacing: .3px;
+             background: rgba(0,0,0,.55); padding: 2px 8px; border-radius: 5px;
+             border: 1px solid rgba(255,255,255,.18); }
+  #hud { position: absolute; top: 12px; left: 12px; background: rgba(0,0,0,.6);
+         backdrop-filter: blur(8px); color: #ced2da; padding: 9px 13px;
+         border-radius: 6px; font-size: 11px; line-height: 1.5; max-width: 320px;
+         border: 1px solid rgba(255,255,255,.08); pointer-events: none; }
+  #hud b { color: #fff; }
+  #leg { position: absolute; bottom: 12px; left: 12px; background: rgba(0,0,0,.55);
+         backdrop-filter: blur(8px); color: #ced2da; padding: 7px 11px;
+         border-radius: 6px; font-size: 11px; border: 1px solid rgba(255,255,255,.1); }
+  #leg span { margin-right: 10px; white-space: nowrap; }
+  #panel { position: absolute; top: 12px; right: 12px; width: 360px; display: none;
+           flex-direction: column; background: rgba(10,10,30,.93); backdrop-filter: blur(10px);
+           border: 1px solid rgba(255,255,255,.12); border-radius: 8px; color: #ced2da;
+           font-size: 12px; max-height: 90%; box-shadow: 0 8px 30px rgba(0,0,0,.5); }
+  #panel .ph { padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,.1); position: relative; }
+  #panel .pt { font-size: 15px; font-weight: 700; color: #fff; line-height: 1.25; }
+  #panel .pc { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; opacity: .7; margin-top: 4px; }
+  #panel .pb { padding: 10px 14px 16px; overflow-y: auto; }
+  #panel a { color: #9fd0ff; pointer-events: auto; font-weight: 600; }
+  #panel .close { position: absolute; top: 8px; right: 11px; cursor: pointer; color: #8b949e;
+                  font-size: 18px; pointer-events: auto; }
+  #panel .close:hover { color: #fff; }
+  .prow { display: flex; gap: 8px; font-size: 12px; line-height: 1.4; padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+  .pk { color: #7d848f; flex: 0 0 96px; } .pv { color: #d7dde5; flex: 1; }
+  .pchip { display: inline-block; background: rgba(138,147,255,.18); border: 1px solid rgba(138,147,255,.5);
+           color: #aab2ff; border-radius: 10px; padding: 1px 8px; font-size: 11px; margin: 2px 3px 0 0; }
+  .ptier { display: inline-block; font-size: 11px; font-weight: 600; border: 1px solid; border-radius: 10px;
+           padding: 1px 8px; margin-bottom: 6px; }
+  .pdeep { display: inline-block; margin: 2px 0 4px; padding: 5px 10px; border-radius: 6px;
+           background: rgba(159,208,255,.12); border: 1px solid rgba(159,208,255,.35);
+           font-weight: 600; text-decoration: none; }
+  .pdeep:hover { background: rgba(159,208,255,.22); }
+  .btn { position: absolute; cursor: pointer; background: rgba(0,0,0,.6);
+         backdrop-filter: blur(8px); color: #ced2da; padding: 6px 12px; border-radius: 6px;
+         font-size: 11px; border: 1px solid rgba(255,255,255,.12); pointer-events: auto;
+         user-select: none; }
+  .btn:hover { color: #fff; }
+  #toggle { bottom: 12px; right: 12px; }
+  #lbltoggle { bottom: 12px; right: 140px; }
+  #fb { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+        color: #f85149; font-size: 13px; padding: 40px; text-align: center; }
+</style>
+<div id="cw">
+  <canvas id="cv"></canvas>
+  <div id="labels"></div>
+  <div id="hud"><b>Trend map</b><br>loading…</div>
+  <div id="leg"></div>
+  <div id="panel"><div class="ph"><span class="close" id="pclose">&times;</span>
+    <div class="pt" id="ptitle"></div><div class="pc" id="pclass"></div></div>
+    <div class="pb" id="pbody"></div></div>
+  <div id="toggle" class="btn">stories: show</div>
+  <div id="lbltoggle" class="btn">topic labels: hide</div>
+  <div id="fb"></div>
+</div>
+<script type="module">
+import { Graph } from "https://esm.sh/@cosmograph/cosmos@1.6.1";
+
+const DATA = window.GRAPH_DATA || { nodes: [], links: [] };
+const IMP = { High: 1.6, Medium: 1.0, Low: 0.72 };
+const TIER = { 1: 1.25, 2: 1.12, 3: 1.0, 4: 0.82 };
+const esc = s => (s == null ? "" : String(s)).replace(/[&<>"]/g, c =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// Cosmograph's nodeColor wants a colour STRING (hex); rgba arrays render black.
+function hslHex(h, s, l) {                // h 0-360; s,l 0-100
+  s /= 100; l /= 100;
+  const c = (1 - Math.abs(2*l - 1)) * s, x = c * (1 - Math.abs((h/60) % 2 - 1)), m = l - c/2;
+  let r, g, b;
+  if (h < 60)       { r = c; g = x; b = 0; }
+  else if (h < 120) { r = x; g = c; b = 0; }
+  else if (h < 180) { r = 0; g = c; b = x; }
+  else if (h < 240) { r = 0; g = x; b = c; }
+  else if (h < 300) { r = x; g = 0; b = c; }
+  else              { r = c; g = 0; b = x; }
+  const to = v => Math.round((v + m) * 255).toString(16).padStart(2, "0");
+  return "#" + to(r) + to(g) + to(b);
+}
+const hue = t => (t * 137.5) % 360;       // golden-angle spacing keeps neighbours distinct
+let showStories = false;
+
+function nodeColor(n) {
+  if (n.t === "concept") return "#ffffff";
+  if (n.t === "topic") return hslHex(hue(n.topic), 72, 62);
+  return hslHex(hue(n.topic), 68, 58);
+}
+function nodeSize(n) {
+  if (n.t === "concept") return 2 + Math.log2((n.size || 1) + 1) * 0.5;
+  if (n.t === "topic") return 3 + Math.log2((n.size || 1) + 1) * 1.1;
+  if (!showStories) return 0.0;
+  return 2.8 * (IMP[n.imp] || 1.0) * (TIER[n.tier] || 1.0);
+}
+
+const hud = document.getElementById("hud");
+const panel = document.getElementById("panel");
+document.getElementById("pclose").onclick = () => panel.style.display = "none";
+// Deep-link a topic card into the Topics section. We're in a srcdoc iframe
+// (same-origin with the app), so navigate the TOP window with ?topic=<id>.
+document.addEventListener("click", (e) => {
+  const a = e.target.closest && e.target.closest(".pgo");
+  if (!a) return;
+  e.preventDefault();
+  const tid = a.getAttribute("data-topic");
+  try { const L = window.top.location; L.assign(L.pathname + "?topic=" + encodeURIComponent(tid)); }
+  catch (_) { window.open("?topic=" + encodeURIComponent(tid), "_top"); }
+});
+document.getElementById("leg").innerHTML =
+  `<span><b style="color:#ffffff">&#9679;</b> concept</span>` +
+  `<span><b style="color:#8fd">&#9679;</b> topic</span>` +
+  `<span><b style="color:#8a90a0">&#9679;</b> story (toggle below)</span>`;
+
+const TIER_NAME = { 1: "T1 · primary / official", 2: "T2 · established press",
+                    3: "T3 · blogs and general", 4: "T4 · social / aggregated" };
+const TIER_COL = { 1: "#f0d000", 2: "#58a6ff", 3: "#8b949e", 4: "#f85149" };
+const prows = pairs => (pairs || []).filter(p => p && p[1]).map(p =>
+  `<div class="prow"><span class="pk">${esc(p[0])}</span><span class="pv">${esc(p[1])}</span></div>`).join("");
+const pchips = arr => (arr || []).map(t => `<span class="pchip">${esc(t)}</span>`).join(" ");
+function renderPanel(n) {
+  document.getElementById("ptitle").textContent = n.label || n.id;
+  const cls = n.t === "concept" ? "anchor concept"
+    : n.t === "topic" ? `topic · ${n.size || 0} stories` : "story";
+  document.getElementById("pclass").textContent = cls;
+  let h = "";
+  if (n.t === "story") {
+    const t = n.tier || 3, tc = TIER_COL[t] || "#8b949e";
+    h += `<div class="ptier" style="border-color:${tc};color:${tc}">${esc(TIER_NAME[t] || ("T" + t))}</div>`;
+    h += prows([["Score", n.points], ["Comments", n.comments],
+                ["Date", n.date], ["Domain", n.domain]]);
+    if (n.kw && n.kw.length) h += `<div style="margin-top:6px">${pchips(n.kw)}</div>`;
+    if (n.url) h += `<div style="margin-top:8px"><a href="${esc(n.url)}" target="_blank" rel="noopener">Open original &#8599;</a></div>`;
+  } else if (n.t === "topic") {
+    h += `<a class="pdeep pgo" data-topic="${esc(n.topic)}" href="#">Open in Topics &rarr;</a>`;
+    h += `<div style="opacity:.85;margin-top:8px">Cluster of related stories. The full profile, weekly signal and story list live in the Topics section.</div>`;
+  } else {
+    h += `<div style="opacity:.85">Recurring term shared across topics; it anchors the skeleton the clusters hang from. Mentioned in ${n.size || 0} stories.</div>`;
+  }
+  document.getElementById("pbody").innerHTML = h;
+  panel.style.display = "flex";
+}
+
+// Labels sit at the precomputed layout positions.
+const labelsBox = document.getElementById("labels");
+const POS = {}; DATA.nodes.forEach(n => { if (Number.isFinite(n.x)) POS[n.id] = [n.x, n.y]; });
+const asXY = p => !p ? null : Array.isArray(p) ? [p[0], p[1]]
+  : (typeof p === "object" && "x" in p) ? [p.x, p.y] : null;
+// One short word per topic — long labels overlap and bury the map.
+function firstWord(s) {
+  const w = (s || "").split(/[\s·,:/()]+/).filter(Boolean);
+  for (const t of w) if (t.replace(/[^A-Za-z]/g, "").length > 3) return t;
+  return w[0] || (s || "");
+}
+let showTopicLabels = true;
+const topicLabels = DATA.nodes.filter(n => n.t === "topic")
+  .sort((a, b) => (b.size || 0) - (a.size || 0)).slice(0, 30)
+  .map(n => { const el = document.createElement("div");
+    el.className = "lbl"; el.textContent = firstWord(n.label);
+    el.title = n.label;                                   // full label on hover
+    labelsBox.appendChild(el); return { el, space: POS[n.id] || null }; });
+const hubLabels = DATA.nodes.filter(n => n.t === "concept")
+  .sort((a, b) => (b.size || 0) - (a.size || 0)).slice(0, 8)
+  .map(n => { const el = document.createElement("div");
+    el.className = "lbl hub"; el.textContent = n.label;
+    labelsBox.appendChild(el); return { el, space: POS[n.id] || null }; });
+function placeLabels(graph) {
+  if (!graph.spaceToScreenPosition) return;
+  const put = (el, sp) => {
+    if (!sp || !isFinite(sp[0])) { el.style.display = "none"; return; }
+    let scr; try { scr = asXY(graph.spaceToScreenPosition([sp[0], sp[1]])); } catch (_) { scr = null; }
+    if (!scr || !isFinite(scr[0]) || !isFinite(scr[1])) { el.style.display = "none"; return; }
+    el.style.display = "block"; el.style.left = scr[0] + "px"; el.style.top = scr[1] + "px";
+  };
+  for (const l of topicLabels) { if (!showTopicLabels) { l.el.style.display = "none"; continue; } put(l.el, l.space); }
+  for (const l of hubLabels) put(l.el, l.space);
+}
+
+const canvas = document.getElementById("cv");
+const wrap = document.getElementById("cw");
+function sizeCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = wrap.clientWidth || 1200, h = wrap.clientHeight || 760;
+  canvas.width = Math.max(w * dpr, 100); canvas.height = Math.max(h * dpr, 100);
+  canvas.style.width = w + "px"; canvas.style.height = h + "px";
+}
+
+try {
+  if (!DATA.nodes.length) throw new Error("no data — run the pipeline (make data)");
+  sizeCanvas();
+  const config = {
+    backgroundColor: "#0a0a1e",
+    spaceSize: 8192,
+    disableSimulation: true,                  // positions precomputed offline
+    pixelRatio: window.devicePixelRatio || 2,
+    nodeColor, nodeSize, nodeSizeScale: 1,
+    renderHoveredNodeRing: true,
+    hoveredNodeRingColor: "#ffffff",
+    renderLinks: true,
+    linkColor: (l) => l.rel === "topic_concept" ? "rgba(255,236,160,.85)"  // tether to skeleton
+                    : l.rel === "related" ? "rgba(120,200,255,.55)"
+                    : "rgba(160,175,220,.22)",                             // story to topic
+    linkWidth: (l) => l.rel === "topic_concept" ? 1.0 + (l.w || 0) * 1.2
+                    : l.rel === "related" ? 0.8 : 0.4,
+    linkArrows: false,
+    linkVisibilityMinTransparency: 0.25,
+    curvedLinks: false,
+    fitViewOnInit: true,
+    fitViewDelay: 500,
+    events: {
+      onClick: (n) => {
+        if (!n) { panel.style.display = "none"; return; }
+        renderPanel(n); hud.innerHTML = `<b>${esc(n.label)}</b>`;
+      },
+    },
+  };
+  let graph;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    sizeCanvas();
+    graph = new Graph(canvas, config);
+    graph.setData(DATA.nodes, DATA.links);
+    hud.innerHTML = `<b>${DATA.nodes.length} nodes · ${DATA.links.length} links</b><br>`
+      + `white dots are anchor concepts, coloured hubs are topics<br>`
+      + `click a node for its card · toggle stories bottom right`;
+    setTimeout(() => { try { graph.fitView(600); } catch (_) {} }, 500);
+    setInterval(() => placeLabels(graph), 150);
+  }));
+  const lt = document.getElementById("lbltoggle");
+  lt.onclick = () => {
+    showTopicLabels = !showTopicLabels;
+    lt.textContent = showTopicLabels ? "topic labels: hide" : "topic labels: show";
+  };
+  const tg = document.getElementById("toggle");
+  tg.onclick = () => {
+    showStories = !showStories;
+    tg.textContent = showStories ? "stories: hide" : "stories: show";
+    try { graph.setConfig({ nodeSize: (n) => nodeSize(n) }); } catch (_) {}
+  };
+  window.addEventListener("resize", () => { sizeCanvas(); try { graph && graph.fitView(); } catch (_) {} });
+} catch (err) {
+  console.error(err);
+  const fb = document.getElementById("fb");
+  fb.style.display = "flex"; fb.textContent = "Cosmograph: " + err.message;
+}
+</script>

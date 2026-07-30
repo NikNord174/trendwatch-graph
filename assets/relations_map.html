@@ -1,0 +1,190 @@
+<!-- Relations viewer. Renders window.TREND_DATA (pipeline/export.py): topics
+     tethered to their anchor concepts, plus links between similar topics.
+     Positions precomputed offline, GPU simulation off. Standalone: open next
+     to relations_data.js; in the app the data is inlined. -->
+<script src="relations_data.js"></script>
+<style>
+  #rw { position: relative; width: 100%; height: 760px; background: #0e1117;
+        border-radius: 8px; overflow: hidden; font-family: -apple-system, "Inter", system-ui, sans-serif; }
+  #rv { display: block; width: 100%; height: 100%; }
+  .rlbl { position: absolute; transform: translate(-50%, -50%); pointer-events: none;
+          color: #eaf0ff; font-size: 11px; font-weight: 600; white-space: nowrap;
+          text-shadow: 0 0 6px #000, 0 0 10px #000; opacity: .92; }
+  .rlbl.hub { font-size: 15px; font-weight: 800; background: rgba(0,0,0,.5);
+              padding: 2px 8px; border-radius: 5px; border: 1px solid rgba(255,255,255,.18); }
+  #rhud { position: absolute; top: 12px; left: 12px; background: rgba(0,0,0,.6); backdrop-filter: blur(8px);
+          color: #ced2da; padding: 9px 13px; border-radius: 6px; font-size: 11px; line-height: 1.5;
+          max-width: 340px; border: 1px solid rgba(255,255,255,.08); pointer-events: none; }
+  #rhud b { color: #fff; }
+  #rleg { position: absolute; bottom: 12px; left: 12px; background: rgba(0,0,0,.55); backdrop-filter: blur(8px);
+          color: #ced2da; padding: 7px 11px; border-radius: 6px; font-size: 11px; border: 1px solid rgba(255,255,255,.1);
+          max-width: 46%; }
+  #rleg span { margin-right: 10px; white-space: nowrap; display: inline-block; }
+  #rpanel { position: absolute; top: 12px; right: 12px; width: 360px; display: none; flex-direction: column;
+            background: rgba(14,17,23,.96); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,.12);
+            border-radius: 8px; color: #ced2da; font-size: 12px; max-height: 92%; box-shadow: 0 8px 30px rgba(0,0,0,.5); }
+  #rpanel .ph { padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,.1); position: relative; }
+  #rpanel .pt { font-size: 15px; font-weight: 700; color: #fff; line-height: 1.25; }
+  #rpanel .pc { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; opacity: .7; margin-top: 4px; }
+  #rpanel .pb { padding: 10px 14px 16px; overflow-y: auto; white-space: pre-wrap; line-height: 1.5; }
+  #rpanel a { color: #9fd0ff; }
+  .rpdeep { display: inline-block; margin: 2px 0 10px; padding: 5px 10px; border-radius: 6px;
+            background: rgba(159,208,255,.12); border: 1px solid rgba(159,208,255,.35);
+            font-weight: 600; text-decoration: none; }
+  .rpdeep:hover { background: rgba(159,208,255,.22); }
+  .rpnh { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; opacity: .65;
+          margin: 12px 0 5px; }
+  .rpnl { margin: 0; padding-left: 0; list-style: none; }
+  .rpnl li { margin: 0 0 7px; line-height: 1.4; }
+  .rpt { display: inline-block; font-size: 9px; font-weight: 700; border: 1px solid; border-radius: 4px;
+         padding: 0 4px; margin-right: 6px; vertical-align: 1px; }
+  .rpm { color: #7d848f; font-size: 11px; }
+  #rpanel .close { position: absolute; top: 8px; right: 11px; cursor: pointer; color: #8b949e; font-size: 18px; pointer-events: auto; }
+  #rpanel .close:hover { color: #fff; }
+  #rtoggle { position: absolute; bottom: 12px; right: 12px; cursor: pointer; background: rgba(0,0,0,.6);
+             backdrop-filter: blur(8px); color: #ced2da; padding: 6px 12px; border-radius: 6px; font-size: 11px;
+             border: 1px solid rgba(255,255,255,.12); pointer-events: auto; user-select: none; }
+  #rfb { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+         color: #f85149; font-size: 13px; padding: 40px; text-align: center; }
+</style>
+<div id="rw">
+  <canvas id="rv"></canvas>
+  <div id="rlabels"></div>
+  <div id="rhud"><b>Relations</b><br>loading…</div>
+  <div id="rleg"></div>
+  <div id="rpanel"><div class="ph"><span class="close" id="rpclose">&times;</span>
+    <div class="pt" id="rptitle"></div><div class="pc" id="rpclass"></div></div>
+    <div class="pb" id="rpbody"></div></div>
+  <div id="rtoggle">labels: hide</div>
+  <div id="rfb"></div>
+</div>
+<script type="module">
+import { Graph } from "https://esm.sh/@cosmograph/cosmos@1.6.1";
+
+const DATA = window.TREND_DATA || { nodes: [], links: [], areas: [] };
+const esc = s => (s == null ? "" : String(s)).replace(/[&<>"]/g, c =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const asXY = p => !p ? null : Array.isArray(p) ? [p[0], p[1]] : (typeof p === "object" && "x" in p) ? [p.x, p.y] : null;
+
+function nodeColor(n) { return n.color || "#9aa0aa"; }     // hex strings (arrays render black)
+function nodeSize(n) { return n.t === "concept" ? 16 : 4 + Math.log2((n.size || 1) + 1) * 1.6; }
+
+const hud = document.getElementById("rhud");
+const panel = document.getElementById("rpanel");
+document.getElementById("rpclose").onclick = () => panel.style.display = "none";
+// Deep-link into the Topics section (srcdoc iframe -> navigate the top window).
+document.addEventListener("click", (e) => {
+  const a = e.target.closest && e.target.closest(".rpgo");
+  if (!a) return;
+  e.preventDefault();
+  const tid = a.getAttribute("data-topic");
+  try { const L = window.top.location; L.assign(L.pathname + "?topic=" + encodeURIComponent(tid)); }
+  catch (_) { window.open("?topic=" + encodeURIComponent(tid), "_top"); }
+});
+document.getElementById("rleg").innerHTML =
+  (DATA.areas || []).map(a => `<span><b style="color:${a.color}">&#9679;</b> ${esc(a.name)}</span>`).join("")
+  + `<span style="opacity:.75">coloured line = anchored to concept · gray line = related topics</span>`;
+
+const TIER_COL = { 1: "#f0d000", 2: "#58a6ff", 3: "#8b949e", 4: "#f85149" };
+function renderPanel(n) {
+  document.getElementById("rptitle").textContent = n.label || n.id;
+  document.getElementById("rpclass").textContent = n.t === "concept"
+    ? "anchor concept" : `topic · ${n.size || 0} stories${n.area ? " · " + n.area : ""}`;
+  let h = "";
+  if (n.t === "concept") {
+    h = "Topics tethered to this concept share it as their dominant term. Click one for its profile.";
+  } else {
+    const tid = String(n.id).replace(/^t:/, "");
+    h += `<a class="rpdeep rpgo" data-topic="${esc(tid)}" href="#">Open in Topics (filtered) &rarr;</a>`;
+    const nl = n.news || [];
+    if (nl.length) {
+      h += `<div class="rpnh">Top stories in this topic — ${n.news_total || nl.length} total:</div>`;
+      h += '<ol class="rpnl">' + nl.map(it => {
+        const tc = TIER_COL[it.tier] || "#8b949e";
+        const badge = `<span class="rpt" style="border-color:${tc};color:${tc}">T${it.tier}</span>`;
+        const meta = [it.points ? it.points + " pts" : "", it.date].filter(Boolean).join(" · ");
+        const title = esc(it.title);
+        const inner = it.url
+          ? `<a href="${esc(it.url)}" target="_blank" rel="noopener">${title}</a>` : title;
+        return `<li>${badge}${inner}${meta ? `<span class="rpm"> ${esc(meta)}</span>` : ""}</li>`;
+      }).join("");
+      const extra = (n.news_total || nl.length) - nl.length;
+      h += "</ol>";
+      if (extra > 0) h += `<div class="rpm">…${extra} more — <a class="rpgo" data-topic="${esc(tid)}" href="#">see all in Topics</a></div>`;
+    }
+    h += `<div class="rpnh">Topic profile:</div>`;
+    h += (n.report || "No profile available.").replace(/\[([^\]]+)\]\(([^)]+)\)/g,
+      '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  }
+  document.getElementById("rpbody").innerHTML = h;
+  panel.style.display = "flex";
+}
+
+// Labels: every hub concept + the biggest topics; the rest show on hover.
+const labelsBox = document.getElementById("rlabels");
+let showLabels = true;
+const labelDefs = [];
+DATA.nodes.filter(n => n.t === "concept").forEach(n => labelDefs.push({ n, cls: "rlbl hub" }));
+DATA.nodes.filter(n => n.t === "topic").sort((a, b) => (b.size || 0) - (a.size || 0)).slice(0, 26)
+  .forEach(n => labelDefs.push({ n, cls: "rlbl" }));
+const labelEls = labelDefs.map(d => {
+  const el = document.createElement("div");
+  el.className = d.cls;
+  el.textContent = d.n.t === "concept" ? d.n.label
+    : (d.n.label || "").split(/[\s·,:/()]+/).filter(w => w.replace(/[^A-Za-z]/g, "").length > 3)[0] || d.n.label;
+  el.title = d.n.label;
+  labelsBox.appendChild(el);
+  return { el, sp: [d.n.x, d.n.y], hub: d.n.t === "concept" };
+});
+function placeLabels(graph) {
+  if (!graph.spaceToScreenPosition) return;
+  for (const l of labelEls) {
+    if (!showLabels && !l.hub) { l.el.style.display = "none"; continue; }
+    let scr; try { scr = asXY(graph.spaceToScreenPosition(l.sp)); } catch (_) { scr = null; }
+    if (!scr || !isFinite(scr[0])) { l.el.style.display = "none"; continue; }
+    l.el.style.display = "block"; l.el.style.left = scr[0] + "px"; l.el.style.top = scr[1] + "px";
+  }
+}
+
+const canvas = document.getElementById("rv"), wrap = document.getElementById("rw");
+function sizeCanvas() {
+  const dpr = window.devicePixelRatio || 1, w = wrap.clientWidth || 1200, h = wrap.clientHeight || 760;
+  canvas.width = Math.max(w*dpr, 100); canvas.height = Math.max(h*dpr, 100);
+  canvas.style.width = w + "px"; canvas.style.height = h + "px";
+}
+
+try {
+  if (!DATA.nodes.length) throw new Error("no data — run the pipeline (make data)");
+  sizeCanvas();
+  const config = {
+    backgroundColor: "#0e1117", spaceSize: 8192, disableSimulation: true,
+    pixelRatio: window.devicePixelRatio || 2,
+    nodeColor, nodeSize, nodeSizeScale: 1,
+    renderHoveredNodeRing: true, hoveredNodeRingColor: "#ffffff",
+    renderLinks: true,
+    linkColor: (l) => l.rel === "t_c" ? (l.color || "#9fb0ff") + "aa" : "rgba(136,147,201,.40)",
+    linkWidth: (l) => l.rel === "t_c" ? 1.1 : 0.6,
+    linkArrows: false, curvedLinks: false, linkVisibilityMinTransparency: 0.3,
+    fitViewOnInit: true, fitViewDelay: 400,
+    events: { onClick: (n) => { if (!n) { panel.style.display = "none"; return; } renderPanel(n); hud.innerHTML = `<b>${esc(n.label)}</b>`; } },
+  };
+  let graph;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    sizeCanvas();
+    graph = new Graph(canvas, config);
+    graph.setData(DATA.nodes, DATA.links);
+    hud.innerHTML = `<b>${DATA.nodes.length} nodes · ${DATA.links.length} links</b><br>`
+      + `large = anchor concepts · coloured = topics (colour = anchor, size = volume)<br>`
+      + `click a topic for its profile`;
+    setTimeout(() => { try { graph.fitView(500); } catch (_) {} }, 450);
+    setInterval(() => placeLabels(graph), 150);
+  }));
+  document.getElementById("rtoggle").onclick = (e) => {
+    showLabels = !showLabels; e.target.textContent = showLabels ? "labels: hide" : "labels: show";
+  };
+  window.addEventListener("resize", () => { sizeCanvas(); try { graph && graph.fitView(); } catch (_) {} });
+} catch (err) {
+  console.error(err);
+  const fb = document.getElementById("rfb"); fb.style.display = "flex"; fb.textContent = "Cosmograph: " + err.message;
+}
+</script>

@@ -1,0 +1,4 @@
+requests==2.34.2
+sentence-transformers==5.6.1
+scikit-learn==1.9.0
+igraph==1.0.0

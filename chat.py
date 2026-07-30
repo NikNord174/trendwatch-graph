@@ -28,19 +28,17 @@ def tokenize(text: str) -> list[str]:
 
 @st.cache_data
 def build_index() -> tuple[pd.DataFrame, dict[str, float]]:
-    """One document per topic: label, terms, and its story titles."""
+    """One document per topic: a small `core` field (label + terms) and the
+    full bag of its story-title tokens."""
     topics = data.load_topics()
     news = data.load_news()
     titles = news.groupby("topic")["title"].apply(" ".join)
     docs = topics[["id", "label", "report"]].copy()
-    docs["text"] = (
-        topics["label"]
-        + " "
-        + topics["terms"].apply(" ".join)
-        + " "
-        + topics["id"].map(titles).fillna("")
+    docs["core"] = (topics["label"] + " " + topics["terms"].apply(" ".join)).apply(
+        lambda t: set(tokenize(t))
     )
-    docs["tokens"] = docs["text"].apply(lambda t: set(tokenize(t)))
+    title_tokens = topics["id"].map(titles).fillna("").apply(lambda t: set(tokenize(t)))
+    docs["tokens"] = [core | body for core, body in zip(docs["core"], title_tokens)]
     df_counts: dict[str, int] = {}
     for tokens in docs["tokens"]:
         for tok in tokens:
@@ -50,10 +48,19 @@ def build_index() -> tuple[pd.DataFrame, dict[str, float]]:
     return docs, idf
 
 
+def score_topic(q_tokens: set[str], core: set[str], tokens: set[str], idf: dict) -> float:
+    """Label/term matches dominate; title-bag matches are damped by document
+    size, otherwise the biggest topics match any question through sheer
+    vocabulary."""
+    core_score = sum(idf.get(t, 0.0) for t in q_tokens & core)
+    body_score = sum(idf.get(t, 0.0) for t in q_tokens & (tokens - core))
+    return 3.0 * core_score + body_score / math.log2(2 + len(tokens))
+
+
 def retrieve(question: str, top_n: int = 4) -> pd.DataFrame:
     docs, idf = build_index()
     q_tokens = set(tokenize(question))
-    scores = docs["tokens"].apply(lambda ts: sum(idf.get(t, 0.0) for t in q_tokens & ts))
+    scores = docs.apply(lambda r: score_topic(q_tokens, r["core"], r["tokens"], idf), axis=1)
     hits = docs.assign(score=scores).nlargest(top_n, "score")
     return hits[hits["score"] > 0]
 
@@ -77,7 +84,7 @@ def api_key() -> str | None:
         return os.environ.get("OPENAI_API_KEY")
 
 
-def llm_answer(question: str, context: str, key: str) -> str:
+def llm_answer(question: str, context: str, key: str, history: list[dict]) -> str:
     from openai import OpenAI
 
     model = "gpt-5-mini"
@@ -86,13 +93,10 @@ def llm_answer(question: str, context: str, key: str) -> str:
     except FileNotFoundError:
         pass
     client = OpenAI(api_key=key)
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"},
-        ],
-    )
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages += history[-6:]  # keep follow-ups coherent without unbounded cost
+    messages.append({"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"})
+    response = client.chat.completions.create(model=model, messages=messages)
     return response.choices[0].message.content or ""
 
 
@@ -133,9 +137,13 @@ def render() -> None:
     else:
         stories = top_stories(hits["id"].tolist(), question)
         context = build_context(hits, stories)
+        answer = None
         if key:
-            answer = llm_answer(question, context, key)
-        else:
+            try:
+                answer = llm_answer(question, context, key, history[:-1])
+            except Exception:  # noqa: BLE001 -- any API failure degrades to retrieval
+                st.warning("Answer generation is unavailable; showing retrieval results.")
+        if not answer:
             answer = "Closest topics and stories in the snapshot:\n\n" + context
     history.append({"role": "assistant", "content": answer})
     with st.chat_message("assistant"):

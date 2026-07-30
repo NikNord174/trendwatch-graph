@@ -32,6 +32,14 @@ def test_velocity_detects_rising_topic(news_frame):
     assert vel.loc[2] > vel.loc[0]  # steady topic must not outrank it
 
 
+def test_velocity_flat_topic_is_zero_on_short_history(news_frame):
+    """With under 2N weeks the windows shrink symmetrically; a flat signal
+    must not read as a surge."""
+    short = news_frame[(news_frame["topic"] == 0) & (news_frame["date"] < "2026-02-09")]
+    weekly = trends.weekly_signal(short)  # five weeks of identical signal
+    assert trends.velocity(weekly).loc[0] == 0.0
+
+
 def test_filter_topics_by_query_and_area(topics_frame):
     assert trends.filter_topics(topics_frame, "spiky", "all")["id"].tolist() == [1]
     assert trends.filter_topics(topics_frame, "", "ai")["id"].tolist() == [1, 2]

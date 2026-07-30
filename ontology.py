@@ -54,9 +54,9 @@ def render() -> None:
     col4.metric("Removed", changes.get("removed", 0))
     st.caption(
         f"Generated {meta.get('generated_at', 'n/a')} over "
-        f"{meta.get('window', {}).get('from', '')} — {meta.get('window', {}).get('to', '')}. "
-        "Every story has a SHA-256 over its normalized title and URL (data/hashes.json). "
-        "On each pipeline run the current hash set is diffed against the previous one, "
-        "so incremental updates know exactly which entities are new or edited without "
-        "re-reading everything — the counters above come from that diff."
+        f"{meta.get('window', {}).get('from', '')} to {meta.get('window', {}).get('to', '')}. "
+        "Every story carries a SHA-256 of its normalized title and URL "
+        "(data/hashes.json). Each pipeline run diffs its hash set against the "
+        "previous one; the counters above come straight from that diff. Zeros "
+        "mean the corpus did not change between the last two runs."
     )

@@ -23,12 +23,20 @@ def weekly_signal(news: pd.DataFrame) -> pd.DataFrame:
 
 
 def velocity(weekly: pd.DataFrame, recent_weeks: int = 4) -> pd.Series:
-    """Signal of the last N weeks minus the N before, per topic."""
+    """Signal of the last N weeks minus the N before, per topic.
+
+    With a history shorter than 2N weeks the windows shrink symmetrically;
+    comparing a full recent window against a truncated prior one would make
+    every topic look like it is surging.
+    """
     if weekly.empty:
         return pd.Series(dtype=float)
     weeks = sorted(weekly["week"].unique())
-    recent = set(weeks[-recent_weeks:])
-    prior = set(weeks[-2 * recent_weeks : -recent_weeks])
+    n = min(recent_weeks, len(weeks) // 2)
+    if n == 0:
+        return pd.Series(0.0, index=weekly["topic"].unique())
+    recent = set(weeks[-n:])
+    prior = set(weeks[-2 * n : -n])
     by_topic = weekly.groupby("topic")
     recent_sum = by_topic.apply(lambda g: g.loc[g["week"].isin(recent), "weight"].sum())
     prior_sum = by_topic.apply(lambda g: g.loc[g["week"].isin(prior), "weight"].sum())
@@ -39,6 +47,7 @@ def filter_topics(topics: pd.DataFrame, query: str, area: str) -> pd.DataFrame:
     out = topics
     if area and area != "all":
         out = out[out["area"] == area]
+    query = (query or "").strip()
     if query:
         needle = query.lower()
         mask = out["label"].str.lower().str.contains(needle, regex=False) | out["terms"].apply(
@@ -101,7 +110,7 @@ def render(topics: pd.DataFrame, news: pd.DataFrame, meta: dict) -> None:
     if not ids:
         st.info("No topics match the filter.")
         return
-    deep_link = st.query_params.get("topic")
+    deep_link = st.query_params.pop("topic", None)  # apply a map deep-link once
     default = (
         int(deep_link) if deep_link and deep_link.isdigit() and int(deep_link) in ids else ids[0]
     )

@@ -1,8 +1,5 @@
-"""Entry point: page setup and tab dispatch.
-
-One section renders per rerun on purpose: the map tabs inline a multi-megabyte
-data bundle each, and a tabs-layout would embed all of them at once.
-"""
+"""Entry point: page setup and section dispatch. One section per rerun —
+see the README design notes for why."""
 
 import streamlit as st
 
@@ -30,6 +27,8 @@ if "section" not in st.session_state:
     st.session_state["section"] = "Topics" if "topic" in st.query_params else "Trend map"
 
 selected = st.segmented_control("Section", SECTIONS, key="section", label_visibility="collapsed")
+if selected is None:
+    selected = "Trend map"  # clicking the active pill deselects it
 
 if selected == "Trend map":
     maps.render_trend_map()

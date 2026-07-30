@@ -11,22 +11,31 @@ ASSETS = ROOT / "assets"
 DATA = ROOT / "data"
 
 
+def _require(path: Path) -> Path:
+    """Stop with a readable message instead of a traceback when a snapshot
+    file is missing — the fix is always the same."""
+    if not path.exists():
+        st.error(f"Missing snapshot file {path.name} — run `make data` to rebuild.")
+        st.stop()
+    return path
+
+
 @st.cache_data
 def load_topics() -> pd.DataFrame:
-    rows = json.loads((DATA / "topics.json").read_text(encoding="utf-8"))
+    rows = json.loads(_require(DATA / "topics.json").read_text(encoding="utf-8"))
     return pd.DataFrame(rows)
 
 
 @st.cache_data
 def load_news() -> pd.DataFrame:
-    df = pd.read_csv(DATA / "news_topics.csv")
+    df = pd.read_csv(_require(DATA / "news_topics.csv"))
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     return df
 
 
 @st.cache_data
 def load_snapshot_meta() -> dict:
-    meta = json.loads((DATA / "hashes.json").read_text(encoding="utf-8"))
+    meta = json.loads(_require(DATA / "hashes.json").read_text(encoding="utf-8"))
     meta.pop("hashes", None)  # the full hash map is pipeline-side detail
     return meta
 
@@ -34,7 +43,7 @@ def load_snapshot_meta() -> dict:
 @st.cache_data
 def load_graph_counts() -> dict:
     """Node and edge counts by type, for the ontology view."""
-    raw = (ASSETS / "graph_data.js").read_text(encoding="utf-8")
+    raw = _require(ASSETS / "graph_data.js").read_text(encoding="utf-8")
     payload = json.loads(raw.partition("=")[2].strip().rstrip(";"))
     nodes: dict[str, int] = {}
     for n in payload["nodes"]:

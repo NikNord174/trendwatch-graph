@@ -33,9 +33,22 @@ def test_graph_links_resolve(graph):
         assert link["source"] in ids and link["target"] in ids
 
 
-def test_graph_positions_finite(graph):
+def test_graph_positions_inside_viewer_space(graph):
+    """Viewers run with spaceSize=8192 and the simulation off; a snapshot
+    scaled to any other space would render off-screen."""
     for n in graph["nodes"]:
         assert math.isfinite(n["x"]) and math.isfinite(n["y"])
+        assert 0 <= n["x"] <= 8192 and 0 <= n["y"] <= 8192
+
+
+def test_every_concept_participates_in_links(graph):
+    linked: set[str] = set()
+    for link in graph["links"]:
+        linked.add(link["source"])
+        linked.add(link["target"])
+    for n in graph["nodes"]:
+        if n["t"] == "concept":
+            assert n["id"] in linked, f"orphaned concept {n['id']}"
 
 
 def test_graph_story_fields_valid(graph):
@@ -83,7 +96,9 @@ def test_hashes_match_recomputation():
     meta = json.loads((ROOT / "data" / "hashes.json").read_text(encoding="utf-8"))
     news = pd.read_csv(ROOT / "data" / "news_topics.csv").fillna({"url": ""})
     assert meta["stories"] == len(meta["hashes"]) == len(news)
-    sample = news.head(25)
+    # Sample across the whole frame, not just the head — CSV round-trip bugs
+    # (quoting, embedded commas) can hide anywhere.
+    sample = news.iloc[:: max(1, len(news) // 25)]
     for row in sample.itertuples():
         story_id = row.id.removeprefix("s:")
         assert meta["hashes"][story_id] == dedupe.content_hash(row.title, row.url)

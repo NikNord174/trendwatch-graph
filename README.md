@@ -32,24 +32,6 @@ from a plain pip install: no database, no keys.
   topics and stories, an LLM writes the answer if a key is configured
   (without one the tab degrades to plain retrieval).
 
-## How it works
-
-```mermaid
-flowchart LR
-    A[HN Algolia API] --> B[fetch]
-    B --> C[dedupe + content hashes]
-    C --> D[sentence embeddings]
-    D --> E[k-means topics + c-TF-IDF labels]
-    E --> F[force-directed layout]
-    F --> G[frozen snapshot: JS + JSON]
-    G --> H[Streamlit app]
-    H --> I[WebGL map viewers]
-```
-
-The app is snapshot-first on purpose: everything it needs ships in the repo,
-so a clone cannot rot when a free-tier database pauses. The pipeline that
-produced the snapshot is in `pipeline/` and can rebuild it at any time.
-
 ## Run it
 
 Needs Python 3.11 or newer.
@@ -84,9 +66,13 @@ database, applied to flat files.
 ## Design notes
 
 - **Signal model.** A story contributes `tier_weight x (1 + log10(points/50))`
-  to its topic's week: source quality times log-damped attention, so one viral
-  story cannot drown a quarter of steady coverage. Velocity is the last four
-  weeks minus the four before.
+  to its topic's week. Points are the story's Hacker News score, the upvotes
+  it collected; 50 is the fetch cutoff, so a story at the cutoff contributes
+  exactly its tier weight, a 500-point story twice that, a 5,000-point story
+  three times. The log damping is the point: one viral story cannot drown a
+  quarter of steady coverage. `tier_weight` is the source-quality multiplier
+  from the next bullet, 1.25 for primary sources down to 0.8 for social.
+  Velocity is the last four weeks of signal minus the four before.
 - **Source tiers.** Domains are ranked 1-4 (primary sources, established
   press, blogs, social/aggregators) by a small curated table. Crude, but
   honest and easy to audit.

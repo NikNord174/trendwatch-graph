@@ -13,3 +13,4 @@ extend-select = ["I"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]  # bare `pytest` (CI) must resolve the app modules like `python -m pytest` does

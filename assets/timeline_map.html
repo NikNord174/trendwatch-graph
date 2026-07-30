@@ -1,8 +1,8 @@
 <!-- Timeline viewer: the trend map plus a period filter. Topics grow and
      shrink with the number of stories inside the selected window, and hovering
      highlights a node's connections. Renders window.GRAPH_DATA
-     (pipeline/export.py). Standalone: open next to graph_data.js; in the app
-     the data is inlined in place of the script stub. -->
+     (pipeline/export.py). Same standalone/inline data contract as
+     trend_map.html. -->
 <script src="graph_data.js"></script>
 <style>
   #cw { position: relative; width: 100%; height: 760px; background: #0a0a1e;
@@ -27,8 +27,8 @@
   #panel .pt { font-size: 15px; font-weight: 700; color: #fff; line-height: 1.25; }
   #panel .pc { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; opacity: .7; margin-top: 4px; }
   #panel .pb { padding: 10px 14px 16px; overflow-y: auto; }
-  #panel a { color: #9fd0ff; pointer-events: auto; font-weight: 600; }
-  #panel .close { position: absolute; top: 8px; right: 11px; cursor: pointer; color: #8b949e; font-size: 18px; pointer-events: auto; }
+  #panel a { color: #9fd0ff; font-weight: 600; }
+  #panel .close { position: absolute; top: 8px; right: 11px; cursor: pointer; color: #8b949e; font-size: 18px; }
   #panel .close:hover { color: #fff; }
   .prow { display: flex; gap: 8px; font-size: 12px; line-height: 1.4; padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
   .pk { color: #7d848f; flex: 0 0 96px; } .pv { color: #d7dde5; flex: 1; }
@@ -42,13 +42,13 @@
   .pdeep:hover { background: rgba(159,208,255,.22); }
   .btn { position: absolute; cursor: pointer; background: rgba(0,0,0,.6); backdrop-filter: blur(8px);
          color: #ced2da; padding: 6px 12px; border-radius: 6px; font-size: 11px;
-         border: 1px solid rgba(255,255,255,.12); pointer-events: auto; user-select: none; }
+         border: 1px solid rgba(255,255,255,.12); user-select: none; }
   .btn:hover { color: #fff; }
   #toggle { bottom: 64px; right: 12px; }
   #lbltoggle { bottom: 64px; right: 140px; }
   #time { position: absolute; left: 12px; right: 12px; bottom: 12px; background: rgba(0,0,0,.62);
           backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,.12); border-radius: 8px;
-          padding: 8px 16px; color: #ced2da; font-size: 11px; pointer-events: auto;
+          padding: 8px 16px; color: #ced2da; font-size: 11px;
           display: flex; align-items: center; gap: 14px; }
   #trk { position: relative; flex: 1; height: 20px; touch-action: none; }
   #trk .base { position: absolute; top: 8px; left: 0; right: 0; height: 4px; background: #2a2f3e; border-radius: 2px; }
@@ -81,7 +81,13 @@
   <div id="fb"></div>
 </div>
 <script type="module">
-import { Graph } from "https://esm.sh/@cosmograph/cosmos@1.6.1";
+const fail = (msg) => {
+  const fb = document.getElementById("fb");
+  fb.style.display = "flex"; fb.textContent = "Cosmograph: " + msg;
+};
+let Graph;
+try { ({ Graph } = await import("https://esm.sh/@cosmograph/cosmos@1.6.1")); }
+catch (_) { fail("rendering module failed to load — the map needs esm.sh reachable"); }
 
 const DATA = window.GRAPH_DATA || { nodes: [], links: [] };
 const IMP = { High: 1.6, Medium: 1.0, Low: 0.72 };
@@ -111,8 +117,9 @@ storyNodes.forEach(n => {
   n._ts = (Number.isFinite(t) && t >= FLOOR && t <= CEIL) ? t : NaN;
 });
 const tsAll = storyNodes.map(n => n._ts).filter(Number.isFinite).sort((a, b) => a - b);
-const q = p => tsAll.length ? tsAll[Math.min(tsAll.length - 1, Math.max(0, Math.floor(p * tsAll.length)))] : 0;
-const TMIN = q(0.001), TMAX = q(0.999), TSPAN = (TMAX - TMIN) || 1;
+// Full range: the FLOOR/CEIL guard above already removed junk dates, and any
+// quantile trim here would make the newest stories unreachable by the slider.
+const TMIN = tsAll[0] || 0, TMAX = tsAll[tsAll.length - 1] || 1, TSPAN = (TMAX - TMIN) || 1;
 let winFrom = TMIN, winTo = TMAX;
 let activeN = {};                                   // topic id -> stories in window
 function recomputeActive() {
@@ -157,7 +164,7 @@ document.getElementById("leg").innerHTML =
 const TIER_NAME = { 1: "T1 · primary / official", 2: "T2 · established press",
                     3: "T3 · blogs and general", 4: "T4 · social / aggregated" };
 const TIER_COL = { 1: "#f0d000", 2: "#58a6ff", 3: "#8b949e", 4: "#f85149" };
-const prows = pairs => (pairs || []).filter(p => p && p[1]).map(p =>
+const prows = pairs => (pairs || []).filter(p => p && p[1] != null && p[1] !== "").map(p =>
   `<div class="prow"><span class="pk">${esc(p[0])}</span><span class="pv">${esc(p[1])}</span></div>`).join("");
 const pchips = arr => (arr || []).map(t => `<span class="pchip">${esc(t)}</span>`).join(" ");
 function renderPanel(n) {
@@ -209,7 +216,7 @@ function placeLabels(graph) {
   const put = (el, sp) => {
     if (!sp || !isFinite(sp[0])) { el.style.display = "none"; return; }
     let scr; try { scr = asXY(graph.spaceToScreenPosition([sp[0], sp[1]])); } catch (_) { scr = null; }
-    if (!scr || !isFinite(scr[0])) { el.style.display = "none"; return; }
+    if (!scr || !isFinite(scr[0]) || !isFinite(scr[1])) { el.style.display = "none"; return; }
     el.style.display = "block"; el.style.left = scr[0] + "px"; el.style.top = scr[1] + "px";
   };
   for (const l of topicLabels) {                       // hide labels of topics empty in the window
@@ -243,19 +250,19 @@ try {
     linkArrows: false, linkVisibilityMinTransparency: 0.25, curvedLinks: false,
     fitViewOnInit: true, fitViewDelay: 500,
     events: {
-      onClick: (n) => {
-        if (!n) { panel.style.display = "none"; try { graph.unselectNodes(); } catch (_) {} hoverIdx = null; return; }
-        renderPanel(n); hover(n);                    // click also highlights connections
+      // Cosmos passes (node, inputIndex, position, event) — the index is a
+      // separate argument, nodes never carry one.
+      onClick: (n, i) => {
+        if (!n) { panel.style.display = "none"; hover(null); return; }
+        renderPanel(n); hover(i);                    // click also highlights connections
       },
-      // Different cosmos builds expose different hover events — wire all of them.
-      onMouseMove: (n) => hover(n),
-      onNodeMouseOver: (n) => hover(n),
+      onMouseMove: (n, i) => hover(n ? i : null),
+      onNodeMouseOver: (n, i) => hover(i),
       onNodeMouseOut: () => hover(null),
     },
   };
-  function hover(n) {
+  function hover(idx) {
     if (!graph) return;
-    const idx = (n == null) ? null : (typeof n === "number" ? n : n.index);
     if (idx == null) {
       if (hoverIdx != null) { try { graph.unselectNodes(); } catch (_) {} hoverIdx = null; }
       return;
@@ -264,15 +271,20 @@ try {
   }
   let graph, hoverIdx = null;
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    sizeCanvas();
-    graph = new Graph(canvas, config);
-    graph.setData(DATA.nodes, DATA.links);
-    hud.innerHTML = `<b>${DATA.nodes.length} nodes</b><br>`
-      + `topics grow and shrink with the period selected below<br>`
-      + `hover highlights connections · click for the card`;
-    setTimeout(() => { try { graph.fitView(600); } catch (_) {} }, 500);
-    setInterval(() => placeLabels(graph), 150);
-    refreshTime(graph);
+    try {
+      sizeCanvas();
+      graph = new Graph(canvas, config);
+      graph.setData(DATA.nodes, DATA.links);
+      hud.innerHTML = `<b>${DATA.nodes.length} nodes</b><br>`
+        + `topics grow and shrink with the period selected below<br>`
+        + `hover highlights connections · click for the card`;
+      setTimeout(() => { try { graph.fitView(600); } catch (_) {} }, 500);
+      setInterval(() => placeLabels(graph), 150);
+      refreshTime(graph);
+    } catch (err) {          // WebGL init happens here, after the outer try exits
+      console.error(err);
+      fail(err.message);
+    }
   }));
   document.getElementById("lbltoggle").onclick = (e) => {
     showTopicLabels = !showTopicLabels; e.target.textContent = showTopicLabels ? "topic labels: hide" : "topic labels: show";
@@ -309,17 +321,25 @@ try {
         if (which === 0) f0 = Math.min(f, f1); else f1 = Math.max(f, f0);
         refreshTime();
       };
-      const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
-      window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+      const up = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        window.removeEventListener("pointercancel", up);
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      window.addEventListener("pointercancel", up);
     });
   }
   drag(h0, 0); drag(h1, 1);
   document.getElementById("t-reset").onclick = () => { f0 = 0; f1 = 1; refreshTime(); };
-  window.addEventListener("resize", () => layoutHandles());
 
-  window.addEventListener("resize", () => { sizeCanvas(); try { graph && graph.fitView(); } catch (_) {} });
+  window.addEventListener("resize", () => {
+    sizeCanvas(); layoutHandles();
+    try { graph && graph.fitView(); } catch (_) {}
+  });
 } catch (err) {
   console.error(err);
-  const fb = document.getElementById("fb"); fb.style.display = "flex"; fb.textContent = "Cosmograph: " + err.message;
+  fail(err.message);
 }
 </script>

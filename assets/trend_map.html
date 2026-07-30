@@ -32,9 +32,9 @@
   #panel .pt { font-size: 15px; font-weight: 700; color: #fff; line-height: 1.25; }
   #panel .pc { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; opacity: .7; margin-top: 4px; }
   #panel .pb { padding: 10px 14px 16px; overflow-y: auto; }
-  #panel a { color: #9fd0ff; pointer-events: auto; font-weight: 600; }
+  #panel a { color: #9fd0ff; font-weight: 600; }
   #panel .close { position: absolute; top: 8px; right: 11px; cursor: pointer; color: #8b949e;
-                  font-size: 18px; pointer-events: auto; }
+                  font-size: 18px; }
   #panel .close:hover { color: #fff; }
   .prow { display: flex; gap: 8px; font-size: 12px; line-height: 1.4; padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
   .pk { color: #7d848f; flex: 0 0 96px; } .pv { color: #d7dde5; flex: 1; }
@@ -48,7 +48,7 @@
   .pdeep:hover { background: rgba(159,208,255,.22); }
   .btn { position: absolute; cursor: pointer; background: rgba(0,0,0,.6);
          backdrop-filter: blur(8px); color: #ced2da; padding: 6px 12px; border-radius: 6px;
-         font-size: 11px; border: 1px solid rgba(255,255,255,.12); pointer-events: auto;
+         font-size: 11px; border: 1px solid rgba(255,255,255,.12);
          user-select: none; }
   .btn:hover { color: #fff; }
   #toggle { bottom: 12px; right: 12px; }
@@ -69,7 +69,15 @@
   <div id="fb"></div>
 </div>
 <script type="module">
-import { Graph } from "https://esm.sh/@cosmograph/cosmos@1.6.1";
+const fail = (msg) => {
+  const fb = document.getElementById("fb");
+  fb.style.display = "flex"; fb.textContent = "Cosmograph: " + msg;
+};
+// Dynamic import so a blocked CDN shows a message instead of a page stuck
+// on "loading" (a static import would kill the whole module silently).
+let Graph;
+try { ({ Graph } = await import("https://esm.sh/@cosmograph/cosmos@1.6.1")); }
+catch (_) { fail("rendering module failed to load — the map needs esm.sh reachable"); }
 
 const DATA = window.GRAPH_DATA || { nodes: [], links: [] };
 const IMP = { High: 1.6, Medium: 1.0, Low: 0.72 };
@@ -107,8 +115,13 @@ function nodeSize(n) {
 }
 
 const hud = document.getElementById("hud");
+const HUD_INTRO = () => `<b>${DATA.nodes.length} nodes · ${DATA.links.length} links</b><br>`
+  + `white dots are anchor concepts, coloured hubs are topics<br>`
+  + `click a node for its card · toggle stories bottom right`;
 const panel = document.getElementById("panel");
-document.getElementById("pclose").onclick = () => panel.style.display = "none";
+document.getElementById("pclose").onclick = () => {
+  panel.style.display = "none"; hud.innerHTML = HUD_INTRO();
+};
 // Deep-link a topic card into the Topics section. We're in a srcdoc iframe
 // (same-origin with the app), so navigate the TOP window with ?topic=<id>.
 document.addEventListener("click", (e) => {
@@ -127,7 +140,7 @@ document.getElementById("leg").innerHTML =
 const TIER_NAME = { 1: "T1 · primary / official", 2: "T2 · established press",
                     3: "T3 · blogs and general", 4: "T4 · social / aggregated" };
 const TIER_COL = { 1: "#f0d000", 2: "#58a6ff", 3: "#8b949e", 4: "#f85149" };
-const prows = pairs => (pairs || []).filter(p => p && p[1]).map(p =>
+const prows = pairs => (pairs || []).filter(p => p && p[1] != null && p[1] !== "").map(p =>
   `<div class="prow"><span class="pk">${esc(p[0])}</span><span class="pv">${esc(p[1])}</span></div>`).join("");
 const pchips = arr => (arr || []).map(t => `<span class="pchip">${esc(t)}</span>`).join(" ");
 function renderPanel(n) {
@@ -221,21 +234,24 @@ try {
     fitViewDelay: 500,
     events: {
       onClick: (n) => {
-        if (!n) { panel.style.display = "none"; return; }
+        if (!n) { panel.style.display = "none"; hud.innerHTML = HUD_INTRO(); return; }
         renderPanel(n); hud.innerHTML = `<b>${esc(n.label)}</b>`;
       },
     },
   };
   let graph;
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    sizeCanvas();
-    graph = new Graph(canvas, config);
-    graph.setData(DATA.nodes, DATA.links);
-    hud.innerHTML = `<b>${DATA.nodes.length} nodes · ${DATA.links.length} links</b><br>`
-      + `white dots are anchor concepts, coloured hubs are topics<br>`
-      + `click a node for its card · toggle stories bottom right`;
-    setTimeout(() => { try { graph.fitView(600); } catch (_) {} }, 500);
-    setInterval(() => placeLabels(graph), 150);
+    try {
+      sizeCanvas();
+      graph = new Graph(canvas, config);
+      graph.setData(DATA.nodes, DATA.links);
+      hud.innerHTML = HUD_INTRO();
+      setTimeout(() => { try { graph.fitView(600); } catch (_) {} }, 500);
+      setInterval(() => placeLabels(graph), 150);
+    } catch (err) {          // WebGL init happens here, after the outer try exits
+      console.error(err);
+      fail(err.message);
+    }
   }));
   const lt = document.getElementById("lbltoggle");
   lt.onclick = () => {
@@ -251,7 +267,6 @@ try {
   window.addEventListener("resize", () => { sizeCanvas(); try { graph && graph.fitView(); } catch (_) {} });
 } catch (err) {
   console.error(err);
-  const fb = document.getElementById("fb");
-  fb.style.display = "flex"; fb.textContent = "Cosmograph: " + err.message;
+  fail(err.message);
 }
 </script>

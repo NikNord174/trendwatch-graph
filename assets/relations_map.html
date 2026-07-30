@@ -1,7 +1,7 @@
 <!-- Relations viewer. Renders window.TREND_DATA (pipeline/export.py): topics
      tethered to their anchor concepts, plus links between similar topics.
-     Positions precomputed offline, GPU simulation off. Standalone: open next
-     to relations_data.js; in the app the data is inlined. -->
+     Positions precomputed offline, GPU simulation off. Opens standalone next
+     to relations_data.js. -->
 <script src="relations_data.js"></script>
 <style>
   #rw { position: relative; width: 100%; height: 760px; background: #0e1117;
@@ -39,11 +39,11 @@
   .rpt { display: inline-block; font-size: 9px; font-weight: 700; border: 1px solid; border-radius: 4px;
          padding: 0 4px; margin-right: 6px; vertical-align: 1px; }
   .rpm { color: #7d848f; font-size: 11px; }
-  #rpanel .close { position: absolute; top: 8px; right: 11px; cursor: pointer; color: #8b949e; font-size: 18px; pointer-events: auto; }
+  #rpanel .close { position: absolute; top: 8px; right: 11px; cursor: pointer; color: #8b949e; font-size: 18px; }
   #rpanel .close:hover { color: #fff; }
   #rtoggle { position: absolute; bottom: 12px; right: 12px; cursor: pointer; background: rgba(0,0,0,.6);
              backdrop-filter: blur(8px); color: #ced2da; padding: 6px 12px; border-radius: 6px; font-size: 11px;
-             border: 1px solid rgba(255,255,255,.12); pointer-events: auto; user-select: none; }
+             border: 1px solid rgba(255,255,255,.12); user-select: none; }
   #rfb { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
          color: #f85149; font-size: 13px; padding: 40px; text-align: center; }
 </style>
@@ -59,7 +59,15 @@
   <div id="rfb"></div>
 </div>
 <script type="module">
-import { Graph } from "https://esm.sh/@cosmograph/cosmos@1.6.1";
+const fail = (msg) => {
+  const fb = document.getElementById("rfb");
+  fb.style.display = "flex"; fb.textContent = "Cosmograph: " + msg;
+};
+// Dynamic import so a blocked CDN shows a message instead of a page stuck
+// on "loading" (a static import would kill the whole module silently).
+let Graph;
+try { ({ Graph } = await import("https://esm.sh/@cosmograph/cosmos@1.6.1")); }
+catch (_) { fail("rendering module failed to load — the map needs esm.sh reachable"); }
 
 const DATA = window.TREND_DATA || { nodes: [], links: [], areas: [] };
 const esc = s => (s == null ? "" : String(s)).replace(/[&<>"]/g, c =>
@@ -113,8 +121,12 @@ function renderPanel(n) {
       if (extra > 0) h += `<div class="rpm">…${extra} more — <a class="rpgo" data-topic="${esc(tid)}" href="#">see all in Topics</a></div>`;
     }
     h += `<div class="rpnh">Topic profile:</div>`;
-    h += (n.report || "No profile available.").replace(/\[([^\]]+)\]\(([^)]+)\)/g,
-      '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    // Reports embed raw external story titles: escape everything first, then
+    // linkify, and only accept http(s) targets so no markup or javascript:
+    // URL from a news title can reach innerHTML live.
+    h += esc(n.report || "No profile available.").replace(/\[([^\]]+)\]\(([^)\s]+)\)/g,
+      (m, text, url) => /^https?:\/\//i.test(url)
+        ? `<a href="${url}" target="_blank" rel="noopener">${text}</a>` : text);
   }
   document.getElementById("rpbody").innerHTML = h;
   panel.style.display = "flex";
@@ -141,7 +153,7 @@ function placeLabels(graph) {
   for (const l of labelEls) {
     if (!showLabels && !l.hub) { l.el.style.display = "none"; continue; }
     let scr; try { scr = asXY(graph.spaceToScreenPosition(l.sp)); } catch (_) { scr = null; }
-    if (!scr || !isFinite(scr[0])) { l.el.style.display = "none"; continue; }
+    if (!scr || !isFinite(scr[0]) || !isFinite(scr[1])) { l.el.style.display = "none"; continue; }
     l.el.style.display = "block"; l.el.style.left = scr[0] + "px"; l.el.style.top = scr[1] + "px";
   }
 }
@@ -170,14 +182,19 @@ try {
   };
   let graph;
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    sizeCanvas();
-    graph = new Graph(canvas, config);
-    graph.setData(DATA.nodes, DATA.links);
-    hud.innerHTML = `<b>${DATA.nodes.length} nodes · ${DATA.links.length} links</b><br>`
-      + `large = anchor concepts · coloured = topics (colour = anchor, size = volume)<br>`
-      + `click a topic for its profile`;
-    setTimeout(() => { try { graph.fitView(500); } catch (_) {} }, 450);
-    setInterval(() => placeLabels(graph), 150);
+    try {
+      sizeCanvas();
+      graph = new Graph(canvas, config);
+      graph.setData(DATA.nodes, DATA.links);
+      hud.innerHTML = `<b>${DATA.nodes.length} nodes · ${DATA.links.length} links</b><br>`
+        + `large = anchor concepts · coloured = topics (colour = anchor, size = volume)<br>`
+        + `click a topic for its profile`;
+      setTimeout(() => { try { graph.fitView(500); } catch (_) {} }, 450);
+      setInterval(() => placeLabels(graph), 150);
+    } catch (err) {          // WebGL init happens here, after the outer try exits
+      console.error(err);
+      fail(err.message);
+    }
   }));
   document.getElementById("rtoggle").onclick = (e) => {
     showLabels = !showLabels; e.target.textContent = showLabels ? "labels: hide" : "labels: show";
@@ -185,6 +202,6 @@ try {
   window.addEventListener("resize", () => { sizeCanvas(); try { graph && graph.fitView(); } catch (_) {} });
 } catch (err) {
   console.error(err);
-  const fb = document.getElementById("rfb"); fb.style.display = "flex"; fb.textContent = "Cosmograph: " + err.message;
+  fail(err.message);
 }
 </script>

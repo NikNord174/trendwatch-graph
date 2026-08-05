@@ -3,7 +3,7 @@
 [![ci](https://github.com/NikNord174/trendwatch-graph/actions/workflows/ci.yml/badge.svg)](https://github.com/NikNord174/trendwatch-graph/actions/workflows/ci.yml)
 
 An interactive trend-watching knowledge graph over six months of tech news:
-11,969 Hacker News stories clustered into 120 topics, tethered to 30 shared
+11,969 Hacker News stories clustered into 98 topics, tethered to 30 shared
 concepts, and scored week by week. I built the whole path myself, from
 ingestion and change detection through embeddings, clustering, and layout to
 the exploration UI. A frozen snapshot ships in the repo, so it runs anywhere
@@ -56,12 +56,51 @@ make data
 
 `pipeline/fetch.py` pulls the last 180 days of stories with 50+ points from
 the keyless Algolia HN API; `pipeline/run.py` deduplicates them by normalized
-content hash, embeds titles locally (all-MiniLM-L6-v2), clusters with k-means,
-labels clusters c-TF-IDF style, lays the graph out with Fruchterman-Reingold,
-and writes the snapshot. Each run diffs its hash set against the previous
+content hash, embeds titles locally (all-MiniLM-L6-v2), clusters them, labels
+clusters c-TF-IDF style, lays the graph out with Fruchterman-Reingold, and
+writes the snapshot. Each run diffs its hash set against the previous
 snapshot, so the Ontology tab can report exactly which stories are new or
 changed — the same mechanism an incremental ingest would use against a
 database, applied to flat files.
+
+Clustering defaults to Louvain community detection over a k-nearest-neighbour
+similarity graph: 10 neighbours per story, edges below 0.30 cosine dropped,
+and communities under 10 stories folded into the nearest surviving centroid.
+The method picks its own topic count instead of taking one from me — the
+committed snapshot's 98 topics come from `--resolution 3.5`, chosen after a
+sweep from 25 topics at 1.0 to 184 at 8.0. Leiden is the known successor to
+Louvain and would be the next step. `--method kmeans` keeps the old path with
+`--k` for its topic count. `make data-cached` rebuilds from the cached raw
+file without refetching — same corpus, so the Ontology tab reports a 0/0/0
+diff against the previous snapshot — and `SAVE_VECTORS=1` also writes the
+embeddings to `data/vectors.npz` (gitignored, rebuildable; the Postgres
+loader below needs it).
+
+## Optional backends
+
+Flat files are the right store at this scale — the whole snapshot ships in
+the repo and loads in well under a second. The loaders under `backends/`
+exist to show the same data on query engines, Postgres with pgvector
+and Neo4j, and what the load path looks like when the flat files are the
+source of truth.
+
+```
+make install-backends
+make backends-up     # pgvector on localhost:5433, Neo4j browser on :7474
+make pg-load         # needs data/vectors.npz: make data-cached SAVE_VECTORS=1
+make neo4j-load
+make backends-down
+```
+
+Both databases run from `docker-compose.backends.yml` (credentials
+`postgres`/`trendwatch` and `neo4j`/`trendwatch`, bolt on :7687); the demo
+app never touches them. The Postgres loader finishes with a hybrid query:
+more-like-this by embedding distance (`<=>`) with tier and date filters in
+the same SQL. The Neo4j loader ships three Cypher queries: `concept_hubs`
+(top concepts by anchored topics and total story reach, the default),
+`bridges` (topic pairs a concept ties together that the similarity edges
+missed), and `concept_path` (shortest path between two topic labels through
+the concept layer, `--a`/`--b`).
 
 ## Design notes
 
@@ -85,11 +124,23 @@ database, applied to flat files.
 
 ## Tests
 
-`make test` — 45 pytest cases: the pure pipeline functions (hashing, snapshot
-diff, clustering helpers, the signal model, chat retrieval ranking) and
-integrity checks over the committed snapshot itself (links resolve, dates
-parse, hashes recompute, no orphaned concepts). Streamlit glue is
-deliberately untested.
+`make test` — 76 pytest cases: the pure pipeline functions (hashing, snapshot
+diff, clustering helpers including the kNN graph and Louvain post-processing,
+the signal model, chat retrieval ranking, eval scoring, the backend row
+builders) and integrity checks over the committed snapshot itself (links
+resolve, dates parse, hashes recompute, no orphaned concepts). Streamlit glue
+is deliberately untested.
+
+## Eval
+
+`make eval` runs the golden questions in `eval/golden.json` through the same
+retrieval path the Chat tab uses and prints hit@k — did a known-good story
+make the top k — plus pairwise order agreement, the fraction of story pairs
+the retrieval ranks in the same order as my reference list. It always exits
+0: a measurement, not a CI gate. Three of the twelve questions (q02, q05,
+q06) miss at every k; q02 is the best-understood miss — its topic ranks
+first, but within-topic ranking buries the right story. All three stay in,
+because a golden set that always hits measures nothing.
 
 ## Data and licensing
 
@@ -101,8 +152,10 @@ Maps are rendered with [Cosmograph](https://cosmograph.app)
 
 ## Limitations
 
-- k-means always leaves a few incoherent clusters. They are visible in the
-  Topics table and I kept them; hiding a model's failure modes would
+- Louvain has a resolution limit: genuinely small topics get absorbed into
+  bigger ones, and the merge of sub-10-story communities amplifies that. The
+  incoherent tail is smaller than k-means left, but it exists — visible in
+  the Topics table, and I kept it; hiding a model's failure modes would
   misrepresent it.
 - Velocity over a frozen snapshot is illustrative; in live operation it
   would be recomputed on every refresh.

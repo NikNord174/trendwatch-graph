@@ -1,0 +1,121 @@
+[
+  {
+    "id": "q01",
+    "question": "What's new with the MacBook lineup and the M5 MacBook Pro?",
+    "sources": [
+      "https://www.apple.com/newsroom/2026/03/say-hello-to-macbook-neo/",
+      "https://www.apple.com/newsroom/2026/03/apple-introduces-macbook-pro-with-all-new-m5-pro-and-m5-max/",
+      "https://9to5mac.com/2026/03/26/apple-discontinues-the-mac-pro/",
+      "https://www.reuters.com/world/asia-pacific/apple-raises-prices-macbooks-ipads-memory-costs-skyrocket-2026-06-25/"
+    ],
+    "note": "Launches, then the lineup cuts and price hikes."
+  },
+  {
+    "id": "q02",
+    "question": "Can I run Docker containers natively on macOS now?",
+    "sources": [
+      "https://github.com/apple/container/blob/main/docs/container-machine.md",
+      "https://github.com/J-x-Z/cocoa-way",
+      "https://crawshaw.io/blog/building-a-cloud"
+    ],
+    "note": "Apple's own container machines answer it directly; the other two show the surrounding tooling."
+  },
+  {
+    "id": "q03",
+    "question": "Why is everything getting rewritten in Rust lately?",
+    "sources": [
+      "https://bun.com/blog/bun-in-rust",
+      "https://andrewkelley.me/post/my-thoughts-bun-rust-rewrite.html",
+      "https://ladybird.org/posts/adopting-rust/",
+      "https://github.com/malisper/pgrust"
+    ],
+    "note": "The Bun rewrite drove the debate; Ladybird and pgrust widen the sample."
+  },
+  {
+    "id": "q04",
+    "question": "Are open-weight models like DeepSeek catching up to the frontier?",
+    "sources": [
+      "https://api-docs.deepseek.com/news/news260424",
+      "https://simonwillison.net/2026/Apr/24/deepseek-v4/",
+      "https://www.cnbc.com/2026/07/24/nvidia-microsoft-meta-open-weight-ai-models.html"
+    ]
+  },
+  {
+    "id": "q05",
+    "question": "Have there been supply chain attacks on package registries recently?",
+    "sources": [
+      "https://tanstack.com/blog/npm-supply-chain-compromise-postmortem",
+      "https://socket.dev/blog/bitwarden-cli-compromised",
+      "https://github.com/BerriAI/litellm/issues/24512"
+    ],
+    "note": "Registry compromises across npm and PyPI, postmortem first."
+  },
+  {
+    "id": "q06",
+    "question": "Who got hacked this year? Any major security incidents or breaches?",
+    "sources": [
+      "https://www.0xsid.com/blog/meta-account-takeover-fiasco",
+      "https://www.bleepingcomputer.com/news/security/vercel-confirms-breach-as-hackers-claim-to-be-selling-stolen-data/",
+      "https://www.theverge.com/tech/926458/canvas-shinyhunters-breach",
+      "https://f-droid.org/2026/07/01/adv-malware.html"
+    ]
+  },
+  {
+    "id": "q07",
+    "question": "How is the chip supply chain holding up, and is buying a GPU server worth it?",
+    "sources": [
+      "https://www.tomshardware.com/tech-industry/qatar-helium-shutdown-puts-chip-supply-chain-on-a-two-week-clock",
+      "https://rosmine.ai/2026/05/13/was-my-48k-gpu-worth-it/",
+      "https://github.com/Zaneham/BarraCUDA"
+    ],
+    "note": "The supply-chain squeeze plus two reads on what people actually do with the silicon."
+  },
+  {
+    "id": "q08",
+    "question": "Is global warming actually accelerating?",
+    "sources": [
+      "https://www.researchsquare.com/article/rs-6079807/v1",
+      "https://e360.yale.edu/digest/trump-ooi-amoc",
+      "https://19thnews.org/2026/07/noaa-climate-data-website/"
+    ],
+    "note": "The paper, then what's happening to the monitoring behind it."
+  },
+  {
+    "id": "q09",
+    "question": "Any good stories about old computer hardware?",
+    "sources": [
+      "https://fabiensanglard.net/jurrasic_park_computers/index.html",
+      "https://bugs.xdavidhu.me/tesla/2026/03/23/running-tesla-model-3s-computer-on-my-desk-using-parts-from-crashed-cars/",
+      "https://samhenri.gold/blog/20260312-this-is-not-the-computer-for-you/"
+    ]
+  },
+  {
+    "id": "q10",
+    "question": "Anything fun on the math side lately, binary search tricks or elementary functions?",
+    "sources": [
+      "https://arxiv.org/abs/2603.21852",
+      "https://lemire.me/blog/2026/04/27/you-can-beat-the-binary-search/",
+      "https://lars.ingebrigtsen.no/2026/02/02/whats-up-with-all-those-equals-signs-anyway/"
+    ],
+    "note": "Strongest result first."
+  },
+  {
+    "id": "q11",
+    "question": "What's new in cancer research and vaccines?",
+    "sources": [
+      "https://innovativegenomics.org/news/crispr-technique-selectively-shreds-cancer-cells/",
+      "https://www.lji.org/news-events/news/post/new-hiv-vaccine-shows-unprecedented-success-in-preclinical-study/",
+      "https://sytse.com/cancer/"
+    ],
+    "note": "Two research results and the personal story that carried the topic."
+  },
+  {
+    "id": "q12",
+    "question": "Piracy nostalgia, concert recordings, transcription tools: what is going on with music?",
+    "sources": [
+      "https://mistral.ai/news/voxtral-transcribe-2",
+      "https://techcrunch.com/2026/04/13/thousands-of-rare-concert-recordings-are-landing-on-the-internet-archive-listen-now/",
+      "https://www.pigeonsandplanes.com/read/music-piracy-what-cd-oink-nine-inch-nails-streaming"
+    ]
+  }
+]

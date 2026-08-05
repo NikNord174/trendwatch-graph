@@ -10,6 +10,8 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import numpy as np
+
 from . import cluster, dedupe, embed, export, fetch
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -31,7 +33,12 @@ def load_raw(path: Path) -> list[dict]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--raw", type=Path, default=Path(__file__).parent / "raw" / "stories.jsonl")
-    parser.add_argument("--k", type=int, default=0, help="topic count; 0 = auto")
+    parser.add_argument("--method", choices=("louvain", "kmeans"), default="louvain")
+    parser.add_argument(
+        "--resolution", type=float, default=3.5, help="louvain granularity"
+    )  # default reproduces the committed snapshot
+    parser.add_argument("--k", type=int, default=0, help="topic count (kmeans only); 0 = auto")
+    parser.add_argument("--save-vectors", action="store_true", help="persist embeddings for reuse")
     args = parser.parse_args()
 
     stories = dedupe.dedupe_stories(load_raw(args.raw))
@@ -54,13 +61,28 @@ def main() -> None:
     titles = [s["title"] for s in stories]
     vectors = embed.embed_titles(titles)
 
-    k = args.k or cluster.pick_k(len(stories))
-    labels = cluster.cluster_stories(vectors, k)
+    if args.method == "louvain":
+        edges = cluster.knn_graph(vectors)
+        labels = cluster.louvain_labels(edges, len(stories), resolution=args.resolution)
+        labels = cluster.relabel_dense(cluster.merge_small(labels, vectors))
+    else:
+        labels = cluster.cluster_stories(vectors, args.k or cluster.pick_k(len(stories)))
+    n_topics = len(np.unique(labels))  # resolved count: louvain picks its own k
+
+    if args.save_vectors:
+        vectors_path = ROOT / "data" / "vectors.npz"
+        np.savez_compressed(
+            vectors_path,
+            ids=np.array([f"s:{s['id']}" for s in stories]),
+            vectors=vectors.astype(np.float16),  # half the bytes, and cosine barely notices
+        )
+        print(f"vectors saved: {vectors_path}")
+
     terms = cluster.topic_terms(titles, labels)
     concepts = cluster.extract_concepts(titles)
     shares = cluster.concept_shares(titles, labels, [c for c, _ in concepts])
     sim = cluster.topic_similarity(vectors, labels)
-    print(f"{k} topics, {len(concepts)} concepts, {len(sim)} topic-topic edges")
+    print(f"{n_topics} topics, {len(concepts)} concepts, {len(sim)} topic-topic edges")
 
     nodes, links = export.build_graph(stories, labels, terms, concepts, shares)
     rel_nodes, rel_links, areas = export.build_relations(nodes, terms, shares, sim)
@@ -83,7 +105,7 @@ def main() -> None:
                 "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "window": {"from": dates[0], "to": dates[-1]},
                 "stories": len(stories),
-                "topics": k,
+                "topics": n_topics,
                 "changes_vs_previous": {key: len(val) for key, val in diff.items()},
                 "changed_ids": {"new": diff["new"][:200], "changed": diff["changed"][:200]},
                 "hashes": hashes,

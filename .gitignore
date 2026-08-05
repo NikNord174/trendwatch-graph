@@ -8,3 +8,4 @@ __pycache__/
 .vscode/
 .streamlit/secrets.toml
 pipeline/raw/
+data/vectors.npz

@@ -3,7 +3,8 @@
 PYTHON ?= python3.11
 PY = .venv/bin/python
 
-.PHONY: venv install install-pipeline run test lint format data docker-build docker-run
+.PHONY: venv install install-pipeline install-backends run test lint format eval data \
+	data-cached backends-up backends-down pg-load neo4j-load docker-build docker-run
 
 venv:
 	test -d .venv || $(PYTHON) -m venv .venv
@@ -13,6 +14,9 @@ install: venv
 
 install-pipeline: install
 	$(PY) -m pip install -r requirements-pipeline.txt
+
+install-backends: install
+	$(PY) -m pip install -r requirements-backends.txt
 
 run:
 	.venv/bin/streamlit run app.py
@@ -27,9 +31,27 @@ lint:
 format:
 	.venv/bin/ruff format .
 
+eval:  # retrieval scorecard; never fails the build
+	$(PY) -m eval.run
+
 data:  # needs `make install-pipeline` once beforehand
 	$(PY) -m pipeline.fetch
 	$(PY) -m pipeline.run
+
+data-cached:  # rebuild from the cached raw file without refetching
+	$(PY) -m pipeline.run $(if $(SAVE_VECTORS),--save-vectors)
+
+backends-up:  # pg on localhost:5433, neo4j browser on :7474; needs `make install-backends` once
+	docker compose -f docker-compose.backends.yml up -d --wait
+
+backends-down:
+	docker compose -f docker-compose.backends.yml down
+
+pg-load:  # needs data/vectors.npz — `make data-cached SAVE_VECTORS=1`
+	$(PY) -m backends.pg_loader
+
+neo4j-load:
+	$(PY) -m backends.neo4j_loader
 
 docker-build:
 	docker build -t trendwatch-graph .

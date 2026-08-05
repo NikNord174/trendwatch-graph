@@ -1,5 +1,6 @@
 """Topic clustering, labelling, and anchor-concept extraction."""
 
+import random
 import re
 
 import numpy as np
@@ -104,6 +105,70 @@ def cluster_stories(vectors: np.ndarray, k: int, seed: int = 42) -> np.ndarray:
     from sklearn.cluster import KMeans
 
     return KMeans(n_clusters=k, n_init=4, random_state=seed).fit_predict(vectors)
+
+
+def knn_graph(
+    vectors: np.ndarray, k_neighbors: int = 10, floor: float = 0.30
+) -> list[tuple[int, int, float]]:
+    """kNN edges over normalized vectors (cosine is a dot product here),
+    computed in row blocks: the full similarity matrix for 12k stories would
+    be ~570 MB float32, while 1000-row blocks keep the peak around 50 MB."""
+    n = len(vectors)
+    k = min(k_neighbors, n - 1)  # tiny corpora: cannot rank more neighbors than exist
+    if k < 1:
+        return []  # with 0 or 1 stories the [-k:] slice would take every column, self included
+    weights: dict[tuple[int, int], float] = {}
+    for start in range(0, n, 1000):
+        block = vectors[start : start + 1000] @ vectors.T
+        for offset, sims in enumerate(block):
+            i = start + offset
+            sims[i] = -np.inf  # exclude self; -1.0 could tie with an antipodal neighbor
+            for j in np.argpartition(sims, -k)[-k:]:
+                w = float(sims[j])
+                if w >= floor:
+                    pair = (min(i, int(j)), max(i, int(j)))  # union-symmetrize
+                    weights[pair] = max(weights.get(pair, w), w)  # 0.0 would beat a negative w
+    # Sorted edges make reruns byte-identical: Louvain membership is
+    # sensitive to edge order.
+    return [(i, j, weights[(i, j)]) for i, j in sorted(weights)]
+
+
+def louvain_labels(
+    edges: list[tuple[int, int, float]], n_nodes: int, seed: int = 42, resolution: float = 1.0
+) -> np.ndarray:
+    import igraph as ig  # heavy dep, only the louvain path needs it
+
+    # igraph draws from Python's random module, not numpy's — same idiom as
+    # layout.layout_positions. Isolated nodes come out as singleton
+    # communities; merge_small absorbs them.
+    ig.set_random_number_generator(random.Random(seed))
+    graph = ig.Graph(n=n_nodes, edges=[(a, b) for a, b, _ in edges])
+    part = graph.community_multilevel(weights=[w for _, _, w in edges], resolution=resolution)
+    return np.asarray(part.membership, dtype=int)
+
+
+def merge_small(labels: np.ndarray, vectors: np.ndarray, min_size: int = 10) -> np.ndarray:
+    """Tiny communities render as unreadable map blobs; fold each member into
+    the cosine-nearest surviving community by centroid."""
+    ids, sizes = np.unique(labels, return_counts=True)
+    survivors = ids[sizes >= min_size]
+    if len(survivors) == 0 or len(survivors) == len(ids):
+        return labels  # all-small (degenerate) or nothing to merge
+    centroids = np.stack([vectors[labels == t].mean(axis=0) for t in survivors])
+    centroids /= np.linalg.norm(centroids, axis=1, keepdims=True)
+    out = labels.copy()
+    small = ~np.isin(labels, survivors)
+    out[small] = survivors[np.argmax(vectors[small] @ centroids.T, axis=1)]
+    return out
+
+
+def relabel_dense(labels: np.ndarray) -> np.ndarray:
+    """Dense 0..k-1 ids ordered by descending size, so topic 0 is always the
+    biggest and exports stay readable."""
+    ids, sizes = np.unique(labels, return_counts=True)
+    order = ids[np.argsort(-sizes, kind="stable")]  # size ties break by lower old id
+    mapping = {int(old): new for new, old in enumerate(order)}
+    return np.asarray([mapping[int(t)] for t in labels], dtype=int)
 
 
 def _fold_plural(word: str) -> str:

@@ -312,7 +312,7 @@ def build_relations(
                 break  # one hub tether per topic keeps the map legible
     for a, b, w in topic_sim:
         if f"t:{a}" in index and f"t:{b}" in index:
-            links.append({"source": f"t:{a}", "target": f"t:{b}", "rel": "t_t"})
+            links.append({"source": f"t:{a}", "target": f"t:{b}", "rel": "t_t", "w": round(w, 3)})
             edges.append((index[f"t:{a}"], index[f"t:{b}"], w))
 
     positions = layout.layout_positions(len(nodes), edges)

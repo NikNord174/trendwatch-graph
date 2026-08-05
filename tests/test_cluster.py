@@ -1,6 +1,14 @@
 import numpy as np
+import pytest
 
 from pipeline import cluster
+
+
+def _unit(angles_deg: list[float]) -> np.ndarray:
+    """2D unit vectors at given angles, so cosine between any two is exactly
+    the cosine of their angle difference and expectations stay readable."""
+    rad = np.deg2rad(angles_deg)
+    return np.stack([np.cos(rad), np.sin(rad)], axis=1).astype(np.float32)
 
 
 def test_clean_title_strips_hn_prefixes():
@@ -80,6 +88,94 @@ def test_topic_terms_never_span_titles():
     terms = cluster.topic_terms(titles, labels, top_n=6)
     flat = [t for ts in terms.values() for t in ts]
     assert "alpha beta" not in flat
+
+
+def test_knn_graph_pairs_ordered_and_sorted():
+    edges = cluster.knn_graph(_unit([0, 10, 20, 90, 100, 180]), k_neighbors=2)
+    pairs = [(i, j) for i, j, _ in edges]
+    assert all(i < j for i, j in pairs)
+    assert pairs == sorted(pairs)  # stable edge order in, stable Louvain out
+    assert len(pairs) == len(set(pairs))  # union-symmetrization never duplicates
+
+
+def test_knn_graph_floor_drops_weak_edges():
+    edges = cluster.knn_graph(_unit([0, 5, 90]), k_neighbors=2, floor=0.30)
+    assert {(i, j) for i, j, _ in edges} == {(0, 1)}  # cos(5 deg) ~ 0.996 survives
+    assert edges[0][2] > 0.99
+
+
+def test_knn_graph_union_symmetrizes():
+    """With k=1, node 0 picks node 1 but node 1 picks node 2; the (0, 1)
+    edge must survive — intersection-symmetrizing would orphan node 0."""
+    edges = cluster.knn_graph(_unit([0, 10, 14]), k_neighbors=1, floor=0.30)
+    assert [(i, j) for i, j, _ in edges] == [(0, 1), (1, 2)]
+
+
+def test_knn_graph_edge_count_bounded():
+    """Union-symmetrization can push a hub's degree past k_neighbors, but the
+    total can never exceed n * k_neighbors: every undirected edge originates
+    from at least one directed top-k selection."""
+    rng = np.random.default_rng(1)
+    vectors = rng.normal(size=(40, 8)).astype(np.float32)
+    vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)
+    edges = cluster.knn_graph(vectors, k_neighbors=3, floor=-1.0)
+    assert 0 < len(edges) <= 40 * 3
+
+
+def test_knn_graph_deterministic():
+    rng = np.random.default_rng(2)
+    vectors = rng.normal(size=(30, 4)).astype(np.float32)
+    vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)
+    assert cluster.knn_graph(vectors) == cluster.knn_graph(vectors)
+
+
+def test_knn_graph_single_story():
+    assert cluster.knn_graph(_unit([0.0])) == []
+    assert cluster.knn_graph(np.zeros((0, 2), dtype=np.float32)) == []
+
+
+def test_knn_graph_keeps_negative_weights():
+    edges = cluster.knn_graph(_unit([0, 180]), k_neighbors=1, floor=-1.0)
+    assert edges == [(0, 1, -1.0)]  # cos(180 deg); a max seeded at 0.0 would report 0.0
+
+
+def test_merge_small_absorbs_tiny_community():
+    vectors = _unit([0, 5, 10, 12, 90, 95, 100, 102, 7, 8])
+    labels = np.array([0, 0, 0, 0, 1, 1, 1, 1, 2, 2])
+    merged = cluster.merge_small(labels, vectors, min_size=3)
+    assert list(merged[:8]) == list(labels[:8])
+    assert list(merged[8:]) == [0, 0]  # 7-8 degrees sit inside the 0-12 group
+
+
+def test_merge_small_all_small_unchanged():
+    vectors = _unit([0, 10, 90, 100])
+    labels = np.array([0, 0, 1, 1])
+    assert np.array_equal(cluster.merge_small(labels, vectors, min_size=3), labels)
+
+
+def test_relabel_dense_orders_by_size():
+    out = cluster.relabel_dense(np.array([7, 7, 7, 5, 2, 2]))
+    assert list(out) == [0, 0, 0, 2, 1, 1]
+    assert sorted(set(out.tolist())) == [0, 1, 2]  # dense 0..k-1, no gaps
+
+
+def test_relabel_dense_breaks_ties_by_old_id():
+    assert list(cluster.relabel_dense(np.array([5, 5, 2, 2, 8]))) == [1, 1, 0, 0, 2]
+
+
+def test_louvain_labels_splits_two_cliques():
+    pytest.importorskip("igraph")
+    edges = [
+        (i, j, 1.0) for group in (range(5), range(5, 10)) for i in group for j in group if i < j
+    ]
+    edges.append((4, 5, 0.1))  # weak bridge between the cliques
+    edges.sort()
+    first = cluster.louvain_labels(edges, 10)
+    assert np.array_equal(first, cluster.louvain_labels(edges, 10))
+    assert len(set(first.tolist())) == 2
+    assert len(set(first[:5].tolist())) == 1
+    assert len(set(first[5:].tolist())) == 1
+    assert first[0] != first[5]
 
 
 def test_topic_similarity_finds_close_pair_once():
